@@ -1,0 +1,9 @@
+{
+"name": "Llama 3 Chat", 
+"message_template": "<|start_header_id|>{role}<|end_header_id|>\n\n{content}",
+"end_of_turn": "<|eot_id|>",
+"continue_template": "<|start_header_id|>{role}<|end_header_id|>\n\n",
+"user_role": "user",
+"ai_role": "assistant",
+"system_role": "system"
+}
