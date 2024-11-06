@@ -1,0 +1,9 @@
+{
+"name": "ChatML/Granite Chat", 
+"message_template": "<|start_of_role|>{role}<|end_of_role|>\n{content}",
+"end_of_turn": "<|end_of_text|>",
+"continue_template": "<|start_of_role|>{role}<|end_of_role|>\n",
+"user_role": "user",
+"ai_role": "assistant",
+"system_role": "system"
+}
