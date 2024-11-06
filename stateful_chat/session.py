@@ -327,9 +327,10 @@ class ChatSession:
             # get results
             msg_res = self.query_vector_db(msg['content'], n_results)
             # append results within threshold to dict
-            for i in range(0, len(msg_res.get('documents'))):
-                if msg_res.get('distances')[i] < rag_thresh:
-                    context_docs.append(msg_res.get('documents')[i])
+            for i in range(0, len(msg_res.get('documents')[0])):
+                print(str(msg_res.get('distances')))
+                if msg_res.get('distances')[0][i] < rag_thresh:
+                    context_docs.append(msg_res.get('documents')[0][i])
         # get instruct formatted history
         cont_prompt = self.format_instruct(eot=True, append_continuation=True, continue_role=self.ai_role)
         # append formatted RAG results
@@ -338,8 +339,10 @@ class ChatSession:
             cont_prompt += cd + "\n"
         cont_prompt += "Response:\n"
         # generate response
+        o_options = self.sampling_options.copy()
+        o_options["stop"] = self.stop_words
         o_gen = ollama.generate(model=self.llm, 
-                                prompt=cont_prompt[:-rem_len],
+                                prompt=cont_prompt,
                                 stream=stream, raw=True, options=o_options)
         # return the generator or result, depending on stream parameter
         return o_gen

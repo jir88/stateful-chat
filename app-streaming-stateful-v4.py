@@ -140,7 +140,7 @@ with tab_main:
                 # reset flag
                 st.session_state.needs_regen = False
                 # embed regenerated AI response
-                self.embed_text(st.session_state.chat_session.messages[-1], "message")
+                st.session_state.chat_session.embed_text(st.session_state.chat_session.messages[-1], "message")
             # if we're continuing, do that now
             if st.session_state.needs_continue:
                 with st.chat_message(st.session_state.chat_session.ai_role):
@@ -151,7 +151,7 @@ with tab_main:
                 # reset flag
                 st.session_state.needs_continue = False
                 # embed continued AI response
-                self.embed_text(st.session_state.chat_session.messages[-1], "message")
+                st.session_state.chat_session.embed_text(st.session_state.chat_session.messages[-1], "message")
             # finally, provide chat input and regen buttons
             user_query = st.chat_input("Type your message here...")
             if user_query is not None and user_query != "":
@@ -167,9 +167,9 @@ with tab_main:
                     st.session_state.chat_session.append_message(role=st.session_state.chat_session.ai_role,
                                                                  content=response)
                 # embed user message
-                self.embed_text(st.session_state.chat_session.messages[-2], "message")
+                st.session_state.chat_session.embed_text(st.session_state.chat_session.messages[-2], "message")
                 # embed AI response
-                self.embed_text(st.session_state.chat_session.messages[-1], "message")
+                st.session_state.chat_session.embed_text(st.session_state.chat_session.messages[-1], "message")
             # regenerate last message button
             st.button(label="Regenerate", on_click=request_regen)
             # regenerate last message button
