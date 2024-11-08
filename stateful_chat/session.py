@@ -95,10 +95,10 @@ class ChatSession:
         fmt_msgs += self.instruct_format.format_messages(self.messages[start_idx:stop_idx], append_continuation=False, eot=True)
         # add summarize prompt
         fmt_msgs += self.instruct_format.format_messages(
-            {
+            [{
                 'role': "system",
                 'content': self.prompt_msg_summary
-            },
+            }],
             append_continuation=True, continue_role=self.ai_role)
         # generate summary
         o_options = self.sampling_options.copy()
@@ -140,10 +140,10 @@ class ChatSession:
                                                          append_continuation=False, eot=True)
         # add summarize prompt
         fmt_msgs += self.instruct_format.format_messages(
-            {
+            [{
                 'role': "system",
                 'content': self.prompt_full_summary
-            },
+            }],
             append_continuation=True, continue_role=self.ai_role)
         # generate summary
         o_options = self.sampling_options.copy()
@@ -159,10 +159,10 @@ class ChatSession:
         entity_prompt = fmt_msgs + msg_summ
         # add entity prompt
         entity_prompt += self.instruct_format.format_messages(
-            {
+            [{
                 'role': "system",
                 'content': self.prompt_entity_list
-            },
+            }],
             append_continuation=True, continue_role=self.ai_role)
         # generate entity list
         o_gen = ollama.generate(model=self.llm, 
@@ -336,6 +336,7 @@ class ChatSession:
         # append formatted RAG results
         cont_prompt += "The following context may be relevant to your response:\n"
         for cd in context_docs:
+            print(cd)
             cont_prompt += cd + "\n"
         cont_prompt += "Response:\n"
         # generate response
@@ -571,10 +572,11 @@ class InstructFormat:
             paramter 'eot' and always includes the end-of-turn on the previous message.
         """
         fmt_msgs = ""
-        for msg in messages[:-1]:
-            fmt_msgs += self.message_template.format(role=msg['role'], content=msg['content'])
-            # always put end-of-turn between messages
-            fmt_msgs += self.end_of_turn
+        if len(messages) > 1:
+            for msg in messages[:-1]:
+                fmt_msgs += self.message_template.format(role=msg['role'], content=msg['content'])
+                # always put end-of-turn between messages
+                fmt_msgs += self.end_of_turn
         fmt_msgs += self.message_template.format(role=messages[-1]['role'], content=messages[-1]['content'])
         # add end-of-turn tokens after last message, if requested
         if eot:
