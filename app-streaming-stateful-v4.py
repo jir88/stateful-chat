@@ -41,6 +41,8 @@ def load_state():
         st.warning("No settings file selected!")
         return
     st.session_state.chat_session = ChatSession.from_json(session_file)
+    # set the instruct format properly in the select box
+    st.session_state.inst_fmt_box = st.session_state.chat_session.instruct_format
 
 # method to load all available instruct formats so we can offer them to the user
 def load_instruct_formats():
@@ -100,7 +102,7 @@ with tab_main:
         st.session_state.instruct_names = (fmt.name for fmt in st.session_state.instruct_formats)
     # format selector
     st.session_state.chat_session.instruct_format = st.selectbox("Instruct format to use:", options=st.session_state.instruct_formats,
-                                                                format_func=lambda fmt: fmt.name)
+                                                                format_func=lambda fmt: fmt.name, key="inst_fmt_box")
     # Base system prompt
     st.session_state.chat_session.system_prompt = st.text_area("System prompt:", st.session_state.chat_session.system_prompt, height = 25)
     
