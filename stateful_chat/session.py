@@ -50,14 +50,15 @@ class ChatSession:
         # FIXME: specify as metadaata in the collection itself?
         self.sampling_options = {
             "num_predict": 512,
-            "num_ctx": 3072,
+            "num_ctx": 4096,
             #"temperature": 0.8,
             #"top_p": 0.92,
             #"top_k": 100,
             #"repeat_penalty": 1.12,
             "temperature": 1.2,
             "min_p": 0.1,
-            "stop": self.stop_words
+            "stop": self.stop_words,
+            "keep_alive": "15m"
         }
 
     def archive_messages(self, start_idx, stop_idx):
@@ -289,7 +290,8 @@ class ChatSession:
         # initialize the database if needed
         if self.vec_db_col is None:
             self.initialize_vector_db()
-        return self.vec_db_col.query(query_texts="search_query: " + query_text, n_results=n_results)
+        return self.vec_db_col.query(query_texts="search_query: " + query_text, n_results=n_results,
+                                    where={'index':{ '$lt': len(self.archived_messages) }})
     
     def get_response(self, stream=True):
         o_options = self.sampling_options.copy()
