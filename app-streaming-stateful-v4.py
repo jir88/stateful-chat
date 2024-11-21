@@ -42,7 +42,7 @@ def load_state():
         return
     st.session_state.chat_session = ChatSession.from_json(session_file)
     # set the instruct format properly in the select box
-    st.session_state.inst_fmt_box = st.session_state.chat_session.instruct_format
+    st.session_state.inst_fmt_box = st.session_state.chat_session.instruct_format.name
 
 # method to load all available instruct formats so we can offer them to the user
 def load_instruct_formats():
@@ -57,8 +57,8 @@ def load_instruct_formats():
     return fmt_obj
 
 def get_response():
-    o_gen = st.session_state.chat_session.get_rag_response(n_msg=2, rag_thresh=0.3, n_results=1, stream=True)
-    #o_gen = st.session_state.chat_session.get_response(stream=True)
+    #o_gen = st.session_state.chat_session.get_rag_response(n_msg=2, rag_thresh=0.3, n_results=1, stream=True)
+    o_gen = st.session_state.chat_session.get_response(stream=True)
      # make wrapper
     def ogen_wrapper(o_gen):
         for chunk in o_gen:
@@ -81,12 +81,6 @@ def get_continuation():
 
     return ogen_wrapper(o_gen)
 
-# system prompt
-#st.session_state.system_prompt = st.text_area("System prompt:", value = "You are a helpful assistant.")
-
-# stop token list
-#st.session_state.chat_session.stop_words = st.text_input("Comma-separated stop words:", ",".join(st.session_state.chat_session.stop_words)).split(",")
-
 # Construct tabs
 tab_main, tab_mem, tab_db = st.tabs(["Main", "Memory", "Database"])
 # =============== Main Tab ========================
@@ -99,10 +93,13 @@ with tab_main:
     if "instruct_formats" not in st.session_state:
         # load available formats
         st.session_state.instruct_formats = load_instruct_formats()
-        st.session_state.instruct_names = (fmt.name for fmt in st.session_state.instruct_formats)
+        print(st.session_state.instruct_formats)
+        st.session_state.instruct_names = [fmt.name for fmt in st.session_state.instruct_formats]
     # format selector
-    st.session_state.chat_session.instruct_format = st.selectbox("Instruct format to use:", options=st.session_state.instruct_formats,
-                                                                format_func=lambda fmt: fmt.name, key="inst_fmt_box")
+    # FIXME: just use format NAMES in the selectbox
+    fmt_name = st.selectbox("Instruct format to use:", options=st.session_state.instruct_names, key="inst_fmt_box")
+    fmt_idx = st.session_state.instruct_names.index(fmt_name)
+    st.session_state.chat_session.instruct_format = st.session_state.instruct_formats[fmt_idx]
     # Base system prompt
     st.session_state.chat_session.system_prompt = st.text_area("System prompt:", st.session_state.chat_session.system_prompt, height = 25)
     
