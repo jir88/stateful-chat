@@ -84,28 +84,22 @@ class ChatSession:
         # make list of messages to summarize
         summ_idx = list(range(start_idx, stop_idx))
         # format messages
+        # TODO: add this to instruct format class? or just ignore it?
         fmt_msgs = "<|begin_of_text|>"
         # start with the system prompt, if any
         full_sys_prompt = self.compile_system_prompt().strip()
         if len(full_sys_prompt) > 0:
-            #fmt_msgs += self.instruct_format.format_message(role=self.instruct_format.system_role,
-            #                                                content = full_sys_prompt, eot=True)
-            fmt_msgs += "<|start_header_id|>system<|end_header_id|>\n\n" + full_sys_prompt + "<|eot_id|>"
-        # now add the actual messages
-        # fmt_msgs += self.instruct_format.format_messages(self.messages[start_idx:stop_idx], append_continuation=False, eot=True)
-        for i in summ_idx:
-            fmt_msgs += "<|start_header_id|>" + self.messages[i]['role'] + "<|end_header_id|>\n\n" + self.messages[i]['content'] + "<|eot_id|>"
+            fmt_msgs += self.instruct_format.format_message(role="system",
+                                                            content = full_sys_prompt, eot=True)
+        # now add the actual messages.
+        fmt_msgs += self.instruct_format.format_messages(self.messages[start_idx:stop_idx], append_continuation=False, eot=True)
         # add summarize prompt
-        #fmt_msgs += self.instruct_format.format_messages(
-        #    {
-        #        'role': self.instruct_format.system_role,
-        #        'content': self.prompt_msg_summary
-        #    },
-        #    append_continuation=True, continue_role=self.ai_role)
-        fmt_msgs += "<|start_header_id|>system<|end_header_id|>\n\n"
-        fmt_msgs += self.prompt_msg_summary
-        # add tags to prompt for LLM response using current AI role
-        fmt_msgs += "<|start_header_id|>" + self.ai_role + "<|end_header_id|>\n\n"
+        fmt_msgs += self.instruct_format.format_messages(
+            [{
+                'role': "system",
+                'content': self.prompt_msg_summary
+            }],
+            append_continuation=True, continue_role=self.ai_role)
         # generate summary
         o_options = self.sampling_options.copy()
         o_options["temperature"] = 0.8 # lower than for generating new text
@@ -137,24 +131,20 @@ class ChatSession:
         # start with the system prompt, if any
         full_sys_prompt = self.compile_system_prompt().strip()
         if len(full_sys_prompt) > 0:
-            #fmt_msgs += self.instruct_format.format_message(role=self.instruct_format.system_role,
-            #                                                content = full_sys_prompt)
-            fmt_msgs += "<|start_header_id|>system<|end_header_id|>\n\n" + full_sys_prompt + "<|eot_id|>"
+            fmt_msgs += self.instruct_format.format_message(role="system",
+                                                            content = full_sys_prompt,
+                                                            eot=True
+                                                           )
         # now add the actual messages
-        # fmt_msgs += self.instruct_format.format_messages(self.messages[start_idx:stop_idx], append_continuation=False)
-        for i in summ_idx:
-            fmt_msgs += "<|start_header_id|>" + self.messages[i]['role'] + "<|end_header_id|>\n\n" + self.messages[i]['content'] + "<|eot_id|>"
+        fmt_msgs += self.instruct_format.format_messages(self.messages[start_idx:stop_idx],
+                                                         append_continuation=False, eot=True)
         # add summarize prompt
-        #fmt_msgs += self.instruct_format.format_messages(
-        #    {
-        #        'role': self.instruct_format.system_role,
-        #        'content': self.prompt_full_summary
-        #    },
-        #    append_continuation=True, continue_role=self.instruct_format.ai_role)
-        fmt_msgs += "<|start_header_id|>system<|end_header_id|>\n\n"
-        fmt_msgs += self.prompt_full_summary
-        # add tags to prompt for LLM response using current AI role
-        fmt_msgs += "<|start_header_id|>" + self.ai_role + "<|end_header_id|>\n\n"
+        fmt_msgs += self.instruct_format.format_messages(
+            [{
+                'role': "system",
+                'content': self.prompt_full_summary
+            }],
+            append_continuation=True, continue_role=self.ai_role)
         # generate summary
         o_options = self.sampling_options.copy()
         o_options["temperature"] = 0.8 # lower than for generating new text
@@ -168,16 +158,12 @@ class ChatSession:
         # now generate list of entities
         entity_prompt = fmt_msgs + msg_summ
         # add entity prompt
-        #entity_prompt += self.instruct_format.format_messages(
-        #    {
-        #        'role': self.instruct_format.system_role,
-        #        'content': self.prompt_entity_list
-        #    },
-        #    append_continuation=True, continue_role=self.instruct_format.ai_role)
-        entity_prompt += "<|start_header_id|>system<|end_header_id|>\n\n"
-        entity_prompt += self.prompt_entity_list
-        # add tags to prompt for LLM response using current AI role
-        entity_prompt += "<|start_header_id|>" + self.ai_role + "<|end_header_id|>\n\n"
+        entity_prompt += self.instruct_format.format_messages(
+            [{
+                'role': "system",
+                'content': self.prompt_entity_list
+            }],
+            append_continuation=True, continue_role=self.ai_role)
         # generate entity list
         o_gen = ollama.generate(model=self.llm, 
                                 prompt=entity_prompt,
@@ -321,12 +307,7 @@ class ChatSession:
         o_options = self.sampling_options.copy()
         o_options["stop"] = self.stop_words
         # generate prompt
-        cont_prompt = self.format_instruct()
-        # cont_prompt += self.instruct_format.continue_template.format(role=self.instruct_format.ai_role)
-        rem_len = len("<|eot_id|><|start_header_id|>" + self.ai_role + "<|end_header_id|>\n\n")
-        # "<|eot_id|>"
-        # add tags to prompt for LLM response using current AI role
-        #result += "<|start_header_id|>" + self.ai_role + "<|end_header_id|>\n\n"
+        cont_prompt = self.format_instruct(eot=False, append_continuation=False)
         o_gen = ollama.generate(model=self.llm, 
                                 prompt=cont_prompt[:-rem_len],
                                 stream=stream, raw=True, options=o_options)
@@ -346,19 +327,23 @@ class ChatSession:
             # get results
             msg_res = self.query_vector_db(msg['content'], n_results)
             # append results within threshold to dict
-            for i in range(0, len(msg_res.get('documents'))):
-                if msg_res.get('distances')[i] < rag_thresh:
-                    context_docs.append(msg_res.get('documents')[i])
+            for i in range(0, len(msg_res.get('documents')[0])):
+                print(str(msg_res.get('distances')))
+                if msg_res.get('distances')[0][i] < rag_thresh:
+                    context_docs.append(msg_res.get('documents')[0][i])
         # get instruct formatted history
-        cont_prompt = self.format_instruct()
+        cont_prompt = self.format_instruct(eot=True, append_continuation=True, continue_role=self.ai_role)
         # append formatted RAG results
         cont_prompt += "The following context may be relevant to your response:\n"
         for cd in context_docs:
+            print(cd)
             cont_prompt += cd + "\n"
         cont_prompt += "Response:\n"
         # generate response
+        o_options = self.sampling_options.copy()
+        o_options["stop"] = self.stop_words
         o_gen = ollama.generate(model=self.llm, 
-                                prompt=cont_prompt[:-rem_len],
+                                prompt=cont_prompt,
                                 stream=stream, raw=True, options=o_options)
         # return the generator or result, depending on stream parameter
         return o_gen
@@ -388,7 +373,7 @@ class ChatSession:
             full_sys_prompt += "\n\nSummary of recent previous messages:\n" + self.message_summaries[-1]['content']
         return full_sys_prompt
 
-    def format_instruct(self, msg_idx=None):
+    def format_instruct(self, msg_idx=None, eot=True, append_continuation=True, continue_role=None):
         """
         Combine messages from this session into a chat prompt. Subclasses can
         override this method to do more complex chat formatting or use 
@@ -407,12 +392,11 @@ class ChatSession:
         # start with the system prompt, if any
         full_sys_prompt = self.compile_system_prompt().strip()
         if len(full_sys_prompt) > 0:
-            result += "<|start_header_id|>system<|end_header_id|>\n\n" + full_sys_prompt + "<|eot_id|>"
+            result += self.instruct_format.format_message(role="system", content=full_sys_prompt, eot=True)
         # now add the actual messages
-        for i in msg_idx:
-            result += "<|start_header_id|>" + self.messages[i]['role'] + "<|end_header_id|>\n\n" + self.messages[i]['content'] + "<|eot_id|>"
-        # add tags to prompt for LLM response using current AI role
-        result += "<|start_header_id|>" + self.ai_role + "<|end_header_id|>\n\n"
+        msg_subset = [self.messages[i] for i in msg_idx]
+        result += self.instruct_format.format_messages(msg_subset, append_continuation=True, eot=True,
+                                                      continue_role=self.ai_role)
         return result
 
     def format_readable(self):
@@ -495,9 +479,10 @@ class ChatSession:
         new_session.instruct_format = uploaded_settings.get("instruct_format")
         if new_session.instruct_format is None:
             # need to add default, which is Llama 3
-            new_session.instruct_format = InstructFormat("Llama 3 Chat",
-                                                         "<|start_header_id|>{role}<|end_header_id|>\n\n{content}<|eot_id|>",
-                                                         "<|start_header_id|>{role}<|end_header_id|>\n\n")
+            new_session.instruct_format = InstructFormat(name="Llama 3 Chat",
+                                                         message_template="<|start_header_id|>{role}<|end_header_id|>\n\n{content}",
+                                                         end_of_turn="<|eot_id|>",
+                                                         continue_template="<|start_header_id|>{role}<|end_header_id|>\n\n")
         else:
             # parse existing format
             new_session.instruct_format = InstructFormat.from_json(new_session.instruct_format)
@@ -587,10 +572,11 @@ class InstructFormat:
             paramter 'eot' and always includes the end-of-turn on the previous message.
         """
         fmt_msgs = ""
-        for msg in messages[:-1]:
-            fmt_msgs += self.message_template.format(role=msg['role'], content=msg['content'])
-            # always put end-of-turn between messages
-            fmt_msgs += self.end_of_turn
+        if len(messages) > 1:
+            for msg in messages[:-1]:
+                fmt_msgs += self.message_template.format(role=msg['role'], content=msg['content'])
+                # always put end-of-turn between messages
+                fmt_msgs += self.end_of_turn
         fmt_msgs += self.message_template.format(role=messages[-1]['role'], content=messages[-1]['content'])
         # add end-of-turn tokens after last message, if requested
         if eot:

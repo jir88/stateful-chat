@@ -1,8 +1,9 @@
 import streamlit as st
-from stateful_chat.session import ChatSession
+from stateful_chat.session import ChatSession,InstructFormat
 import ollama
 import uuid
 import json
+import os
 
 # app config
 st.set_page_config(page_title="Stateful Chatbot", page_icon="🤖")
@@ -40,6 +41,8 @@ def load_state():
         st.warning("No settings file selected!")
         return
     st.session_state.chat_session = ChatSession.from_json(session_file)
+    # set the instruct format properly in the select box
+    st.session_state.inst_fmt_box = st.session_state.chat_session.instruct_format
 
 # method to load all available instruct formats so we can offer them to the user
 def load_instruct_formats():
@@ -99,7 +102,7 @@ with tab_main:
         st.session_state.instruct_names = (fmt.name for fmt in st.session_state.instruct_formats)
     # format selector
     st.session_state.chat_session.instruct_format = st.selectbox("Instruct format to use:", options=st.session_state.instruct_formats,
-                                                                format_func=lambda fmt: fmt.name)
+                                                                format_func=lambda fmt: fmt.name, key="inst_fmt_box")
     # Base system prompt
     st.session_state.chat_session.system_prompt = st.text_area("System prompt:", st.session_state.chat_session.system_prompt, height = 25)
     
@@ -139,7 +142,7 @@ with tab_main:
                 # reset flag
                 st.session_state.needs_regen = False
                 # embed regenerated AI response
-                self.embed_text(st.session_state.chat_session.messages[-1], "message")
+                st.session_state.chat_session.embed_text(st.session_state.chat_session.messages[-1], "message")
             # if we're continuing, do that now
             if st.session_state.needs_continue:
                 with st.chat_message(st.session_state.chat_session.ai_role):
@@ -150,7 +153,7 @@ with tab_main:
                 # reset flag
                 st.session_state.needs_continue = False
                 # embed continued AI response
-                self.embed_text(st.session_state.chat_session.messages[-1], "message")
+                st.session_state.chat_session.embed_text(st.session_state.chat_session.messages[-1], "message")
             # finally, provide chat input and regen buttons
             user_query = st.chat_input("Type your message here...")
             if user_query is not None and user_query != "":
@@ -166,9 +169,9 @@ with tab_main:
                     st.session_state.chat_session.append_message(role=st.session_state.chat_session.ai_role,
                                                                  content=response)
                 # embed user message
-                self.embed_text(st.session_state.chat_session.messages[-2], "message")
+                st.session_state.chat_session.embed_text(st.session_state.chat_session.messages[-2], "message")
                 # embed AI response
-                self.embed_text(st.session_state.chat_session.messages[-1], "message")
+                st.session_state.chat_session.embed_text(st.session_state.chat_session.messages[-1], "message")
             # regenerate last message button
             st.button(label="Regenerate", on_click=request_regen)
             # regenerate last message button
