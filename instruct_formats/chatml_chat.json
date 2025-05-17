@@ -1,5 +1,6 @@
 {
 "name": "ChatML/Granite Chat", 
+"begin_of_text": "",
 "message_template": "<|start_of_role|>{role}<|end_of_role|>\n{content}",
 "end_of_turn": "<|end_of_text|>",
 "continue_template": "<|start_of_role|>{role}<|end_of_role|>\n",

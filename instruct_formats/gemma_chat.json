@@ -1,5 +1,6 @@
 {
 "name": "Gemma 2 Chat", 
+"begin_of_text": "",
 "message_template": "<start_of_turn>{role}\n{content}",
 "end_of_turn": "<end_of_turn>\n",
 "continue_template": "<start_of_turn>{role}\n",

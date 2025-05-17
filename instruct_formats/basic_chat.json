@@ -1,5 +1,6 @@
 {
 "name": "Basic Chat", 
+"begin_of_text": "",
 "message_template": "{role}:\n{content}",
 "end_of_turn": "\n\n",
 "continue_template": "{role}:\n",
