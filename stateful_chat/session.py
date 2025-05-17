@@ -55,7 +55,7 @@ class ChatSession:
             #"top_p": 0.92,
             #"top_k": 100,
             #"repeat_penalty": 1.12,
-            "temperature": 1.2,
+            "temperature": 1.0,
             "min_p": 0.1,
             "stop": self.stop_words,
             "keep_alive": "15m"
