@@ -1,6 +1,7 @@
 import json
 import ollama
 import llama_cpp
+import openai
 
 class LLM:
     """
@@ -315,6 +316,169 @@ class LlamaCppPythonLLM(LLM):
         # return object
         return new_obj
 
+class OpenAILLM(LLM):
+    """
+    Interact with any OpenAI compatible backend.
+    """
+
+    def __init__(self, model, sampling_options=None, instruct_fmt=None):
+        """
+        Create a new LLM provided by an OpenAI-compatible API.
+
+        Args:
+        model (str): Name of the LLM to use.
+        sampling_options (dict): Dictionary of OpenAI sampling parameters to use.
+        instruct_fmt (InstructFormat): The instruct format this LLM expects.
+        """
+        self.model = model
+        self.client = openai.OpenAI(
+            api_key="placeholder",
+            base_url="http://127.0.0.1:8080/v1"
+        )
+        # if no options specified, we provide some reasonable defaults
+        if sampling_options is None:
+            self.sampling_options = {
+                "num_predict": 512,
+                "num_ctx": 4096,
+                "temperature": 1.0,
+                "min_p": 0.1,
+                #"stop": self.stop_words,
+                "keep_alive": "15m"
+            }
+        else: # use the user-supplied options
+            self.sampling_options = sampling_options
+        # use generic instruct format if none specified
+        if instruct_fmt is None:
+            self.instruct_format = InstructFormat(name="Basic Chat",
+                                                  begin_of_text = "",
+                                                  message_template="{role}:\n{content}",
+                                                  end_of_turn="\n\n",
+                                                  continue_template="{role}:\n")
+        else:
+            self.instruct_format = instruct_fmt
+
+    def generate(self, prompt, stream=True):
+        """
+        Generate a response to a given text prompt. If stream is true, function returns a generator
+        that yields the response chunks as they become available. Otherwise, the full response is
+        returned as a string.
+
+        Args:
+        prompt (str): The prompt that the LLM should respond to
+        stream (bool): Whether the response should be streamed as it is generated
+
+        Returns:
+        A generator function if stream is true, otherwise a string containing the response.
+        """
+        # ollama generates dicts with keys 'response' (the text), eval_count, eval_duration (tokens generated and time it took in ms)
+        # prompt_eval_count (how much prompt was sent and processed)
+        # OpenAI format puts the text in response['choices'][0]['message']['content']
+        # TODO: fix the call to pass sampling parameters correctly
+        response = self.client.completions.create(
+            model=self.model, 
+            prompt=prompt, 
+            stream=stream,
+            # try shoving all sampling parameters through this mechanism to avoid manually
+            # specifying the canonical OpenAI ones
+            extra_body=self.sampling_options
+        )
+        print("Streaming?")
+        if not stream:
+            print(response.choices[0])
+            yield {
+                'response': response.choices[0].text
+            }
+        else:
+            for chunk in response:
+                print(chunk)
+                ol_dict = {
+                    'response': chunk.choices[0].text
+                }
+                # add generation speed if available
+                if chunk.usage is not None:
+                    ol_dict['prompt_eval_count'] = chunk.timings['prompt_n']
+                    ol_dict['eval_count'] = chunk.timings['predicted_n']
+                    # ollama outputs times in nanoseconds for some reason...
+                    ol_dict['eval_duration'] = chunk.timings['predicted_ms']/1.0e6
+                yield ol_dict
+        # if not stream:
+        #     return response['choices'][0]['message']['content']
+        # else:
+        #     for chunk in response:
+        #         ol_dict = {
+        #             'response': chunk['choices'][0]['message']['content']
+        #         }
+        #         yield ol_dict
+
+    def generate_instruct(self, messages, respond=True, response_role=None, stream=True):
+        """
+        Generate a response to a given text prompt. If stream is true, function returns a generator
+        that yields the response chunks as they become available. Otherwise, the full response is
+        returned as a string.
+
+        Args:
+        messages (list[dict]): The chat messages that the LLM should respond to
+        respond (bool): If true, LLM will respond to last message. If false, LLM will
+            continue generating from the end of the last message.
+        response_role (str): The role LLM should use when responding.
+        stream (bool): Whether the response should be streamed as it is generated
+
+        Returns:
+        A generator function if stream is true, otherwise a string containing the response.
+        """
+        # TODO: convert to optionally use the actual chat API?
+        if respond and response_role is None:
+            raise ValueError("Response role must be set in order for LLM to respond!")
+        # format messages
+        if respond:
+            fmt_msgs = self.instruct_format.format_messages(messages, bot=True, eot=True,
+                                                            append_continuation=True,
+                                                            continue_role=response_role)
+        else:
+            fmt_msgs = self.instruct_format.format_messages(messages, bot=True, eot=False,
+                                                            append_continuation=False)
+        print(self.generate)
+        return self.generate(prompt=fmt_msgs, stream=stream)
+
+    def to_json(self):
+        """
+        Write this object out as a JSON object.
+
+        Returns: a string containing the JSON object
+        """
+        # define state to save
+        settings_to_download = {"model": self.model,
+                                "sampling_options": self.sampling_options,
+                                "instruct_format": self.instruct_format.to_json()
+                                }
+        # dump it to a JSON file
+        return json.dumps(settings_to_download)
+
+    @classmethod
+    def from_json(cls, json_data):
+        """
+        Load saved session state from a JSON object.
+        Args:
+        json_data (str): JSON object or file containing session data
+
+        Returns: a new ChatSession object initialized from the JSON data
+        """
+        # load saved state
+        if type(json_data) == str:
+            uploaded_settings = json.loads(json_data)
+        else:
+            uploaded_settings = json.load(json_data)
+        # get model name
+        model_name = uploaded_settings.get('model')
+        # pull sampling options
+        samp_opts = uploaded_settings.get('sampling_options')
+        # read instruct format
+        inst_fmt = InstructFormat.from_json(uploaded_settings.get('instruct_format'))
+        # create new LLM object
+        new_obj = cls(model=model_name, sampling_options=samp_opts, instruct_fmt=inst_fmt)
+        # return object
+        return new_obj
+
 class InstructFormat:
     """
     A class to represent the formatting expected by an instruct-tuned LLM.
@@ -416,3 +580,73 @@ class InstructFormat:
                      )
         # return object
         return new_fmt
+
+if __name__ == "__main__":
+    # test OpenAILLM
+    inst_fmt = InstructFormat.from_json(open("./instruct_formats/gemma_chat.json", mode="r"))
+    samp_params = {
+        "temperature": 1.6,
+        "min_p": 0.01,
+        "max_tokens": 12
+    }
+    llm = OpenAILLM(
+        model="gemma-3-4B-it-UD-Q4_K_XL-cpu",
+        sampling_options=samp_params,
+        instruct_fmt=inst_fmt
+    )
+
+    print("Generating in instruct mode...")
+    test_messages = [
+        {
+            "role": "user",
+            "content": "I'm a cat! What are you?"
+        }
+    ]
+    response = llm.generate_instruct(
+        messages=test_messages,
+        respond=True,
+        response_role="assistant",
+        stream=False
+    )
+    print(response)
+    for chunk in response:
+        print(chunk)
+       
+    print("Generating in raw mode...") 
+    response = llm.generate(
+        prompt="I'm a cat, what are you?",
+        stream=False
+    )
+    print(response)
+    for chunk in response:
+        print(chunk)
+    
+    # Streaming output
+
+    print("Streaming in instruct mode...")
+    test_messages = [
+        {
+            "role": "user",
+            "content": "I'm a cat! What are you?"
+        }
+    ]
+    response = llm.generate_instruct(
+        messages=test_messages,
+        respond=True,
+        response_role="assistant",
+        stream=True
+    )
+    print(response)
+    for chunk in response:
+        print(chunk)
+       
+    print("Streaming in raw mode...") 
+    response = llm.generate(
+        prompt="I'm a cat, what are you?",
+        stream=True
+    )
+    print(response)
+    for chunk in response:
+        print(chunk)
+    
+    
