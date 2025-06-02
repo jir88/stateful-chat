@@ -399,7 +399,7 @@ class OpenAILLM(LLM):
                     ol_dict['prompt_eval_count'] = chunk.timings['prompt_n']
                     ol_dict['eval_count'] = chunk.timings['predicted_n']
                     # ollama outputs times in nanoseconds for some reason...
-                    ol_dict['eval_duration'] = chunk.timings['predicted_ms']/1.0e6
+                    ol_dict['eval_duration'] = chunk.timings['predicted_ms']*1.0e6
                 yield ol_dict
         # if not stream:
         #     return response['choices'][0]['message']['content']
