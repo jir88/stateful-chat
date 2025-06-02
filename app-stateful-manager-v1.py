@@ -14,7 +14,7 @@ st.title("Stateful Chatbot")
 # initialize session state
 if "chat_session" not in st.session_state:
     # set up LLM backend
-    llm = scl.OllamaLLM(model="llama3.1:8b-instruct-q4_K_S")
+    llm = scl.OpenAILLM(model="gemma-3-4B-it-UD-Q4_K_XL-cpu")
     # initialize session manager
     cs = scm.StatefulChatManager(llm)
     # TODO: keep using stop words?
@@ -243,7 +243,10 @@ with tab_settings:
         samp_opts = st.session_state.chat_session.llm.sampling_options
         inst_fmt = st.session_state.chat_session.llm.instruct_format
         # initialize new LLM
-        st.session_state.chat_session.llm = scl.OllamaLLM(model=llm_name,
+        # st.session_state.chat_session.llm = scl.OllamaLLM(model=llm_name,
+        #                                                   sampling_options=samp_opts,
+        #                                                   instruct_fmt=inst_fmt)
+        st.session_state.chat_session.llm = scl.OpenAILLM(model=llm_name,
                                                           sampling_options=samp_opts,
                                                           instruct_fmt=inst_fmt)
 
