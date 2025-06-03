@@ -2,7 +2,7 @@ import copy
 import uuid
 import json
 import re
-from stateful_chat.llm import OllamaLLM,InstructFormat
+from stateful_chat.llm import OpenAILLM,InstructFormat
 
 class StatefulChatManager:
     """
@@ -88,7 +88,7 @@ class StatefulChatManager:
         if uploaded_settings.get('chat_thread') is None:
             return StatefulChatManager._recover_old_json_format(uploaded_settings)
         # initialize LLM
-        llm = OllamaLLM.from_json(uploaded_settings.get('llm'))
+        llm = OpenAILLM.from_json(uploaded_settings.get('llm'))
         # create new memory object
         new_obj = cls(llm=llm)
         # load chat thread
@@ -123,7 +123,7 @@ class StatefulChatManager:
                                       continue_template=inst_fmt['continue_template'])
         
         # initialize LLM
-        llm = OllamaLLM(model=uploaded_settings["llm"],
+        llm = OpenAILLM(model=uploaded_settings["llm"],
                         # default sampling options
                         sampling_options=None,
                         instruct_fmt=inst_fmt
@@ -565,7 +565,7 @@ class LLMSummaryMemory(ChatMemory):
         else:
             uploaded_settings = json.load(json_data)
         # initialize LLM
-        llm = OllamaLLM.from_json(uploaded_settings.get('llm'))
+        llm = OpenAILLM.from_json(uploaded_settings.get('llm'))
         # create new memory object
         new_obj = cls(llm=llm)
         # load user role

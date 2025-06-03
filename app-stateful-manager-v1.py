@@ -2,7 +2,7 @@ import streamlit as st
 from stateful_chat.session import ChatSession
 import stateful_chat.manager as scm
 import stateful_chat.llm as scl
-import ollama
+# import ollama
 import uuid
 import json
 import os
@@ -269,7 +269,10 @@ with tab_settings:
         samp_opts = st.session_state.chat_session.chat_memory.llm.sampling_options
         inst_fmt = st.session_state.chat_session.chat_memory.llm.instruct_format
         # initialize new LLM
-        st.session_state.chat_session.chat_memory.llm = scl.OllamaLLM(model=llm_name,
+        # st.session_state.chat_session.chat_memory.llm = scl.OllamaLLM(model=llm_name,
+        #                                                   sampling_options=samp_opts,
+        #                                                   instruct_fmt=inst_fmt)
+        st.session_state.chat_session.chat_memory.llm = scl.OpenAILLM(model=llm_name,
                                                           sampling_options=samp_opts,
                                                           instruct_fmt=inst_fmt)
 
