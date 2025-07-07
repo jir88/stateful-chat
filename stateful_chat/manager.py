@@ -2,7 +2,7 @@ import copy
 import uuid
 import json
 import re
-from stateful_chat.llm import OpenAILLM,InstructFormat
+from stateful_chat.llm import OpenAILLM,InstructFormat,LLM
 
 class StatefulChatManager:
     """
@@ -88,6 +88,7 @@ class StatefulChatManager:
         if uploaded_settings.get('chat_thread') is None:
             return StatefulChatManager._recover_old_json_format(uploaded_settings)
         # initialize LLM
+        # TODO: use some dynamic loading to handle other classes
         llm = OpenAILLM.from_json(uploaded_settings.get('llm'))
         # create new memory object
         new_obj = cls(llm=llm)
@@ -241,6 +242,9 @@ class ChatThread:
     messages (list): A list of messages sent in the chat thread.
     """
 
+    # pulls role names out of a string representation of a thread
+    role_regex = re.compile(r"{{(.+?)}}")
+
     def __init__(self, session_id):
         """
         Initializes the chat session with a given session ID.
@@ -279,17 +283,16 @@ class ChatThread:
             result += "{{" + self.messages[i]['role'] + "}}\n" + self.messages[i]['content'] + "\n"
         return result
 
-    def import_readable(self, formatted_messages):
+    def import_readable(self, formatted_messages:str):
         """
         Parse messages exported by format_readable and use them to replace any
         existing messages in this chat session.
 
         Args:
-        readable_text (str): The formatted messages to be parsed.
+        formatted_messages (str): The formatted messages to be parsed.
         """
-        re_role = re.compile(r"{{(.+?)}}")
         # splitting with capturing groups returns the roles too
-        msg_parts = re_role.split(formatted_messages)
+        msg_parts = self.role_regex.split(formatted_messages)
         # drop first item, which is blank for some reason
         msg_parts = msg_parts[1:]
         
@@ -588,6 +591,239 @@ class LLMSummaryMemory(ChatMemory):
         # return object
         return new_obj
 
+class HierarchicalSummaryManager(StatefulChatManager):
+    """
+    Custom chat manager that compresses long chats into the context window using 
+    heirarchical summaries of older messages, similar to the method used by
+    perchance.ai.
+    """
+
+    def __init__(self, llm:LLM, prop_ctx=0.8, n_levels=3, prop_level=0.5):
+        """
+        Create a new chat manager with a given large language model back-end.
+
+        Args:
+        llm (LLM): an LLM object to use
+        prop_ctx (double): the proportion of its maximum allotted context that a summary
+            level may use up before triggering a higher-level summary.
+        n_levels (int): the number of summary levels to use
+        prop_level (double): the proportion of each level allotted to higher-level
+            summary messages
+        """
+        self.llm = llm
+        # create empty chat thread
+        self.chat_thread = HierarchicalSummaryThread(str(uuid.uuid4()))
+        # create empty memory store
+        self.chat_memory = HierarchicalSummaryMemory(
+            llm=llm,
+            prop_ctx=prop_ctx,
+            n_levels=n_levels,
+            prop_level=prop_level
+            )
+    
+    def get_response(self, stream=True):
+        """
+        Generate an AI response starting with the end of the current thread.
+        Uses summary messages to ensure we don't overflow the context window.
+
+        Args:
+        stream (bool): whether to stream the response or not
+
+        Returns: a generator if streaming or the response text if not streaming
+        """
+        # make the system prompt
+        sys_prompt = self.compile_system_prompt().strip()
+        all_msgs = [{ 'role': "system", 'content': sys_prompt }]
+        # add in-context messages after sys prompt
+        all_msgs.extend(self.chat_thread.get_summarized_thread())
+        # generate response using current thread's AI role
+        return self.llm.generate_instruct(messages=all_msgs,
+                                          respond=True,
+                                          response_role=self.chat_thread.ai_role,
+                                          stream=stream
+                                          )
+
+    def continue_response(self, stream=True):
+        """
+        Continue generating from the end of the most recent message.
+        """
+        # make the system prompt
+        sys_prompt = self.compile_system_prompt().strip()
+        all_msgs = [{ 'role': "system", 'content': sys_prompt }]
+        # add in-context messages after sys prompt
+        all_msgs.extend(self.chat_thread.get_summarized_thread())
+        # continue generating from end of last message
+        return self.llm.generate_instruct(messages=all_msgs,
+                                          respond=False,
+                                          stream=stream
+                                          )
+
+    @classmethod
+    def from_json(cls, json_data):
+        """
+        Load saved session state from a JSON object.
+        Args:
+        json_data (str): JSON object or file containing session data
+
+        Returns: a new HierarchicalSummaryManager object initialized from the JSON data
+        """
+        # load saved state
+        uploaded_settings = json.load(json_data)
+        # if this is an old format, try to recover it
+        # TODO: convert regular managers into hierarchical ones with no summaries?
+        if uploaded_settings.get('chat_thread') is None:
+            return StatefulChatManager._recover_old_json_format(uploaded_settings)
+        # initialize LLM
+        # TODO: use some dynamic loading to handle other classes
+        llm = OpenAILLM.from_json(uploaded_settings.get('llm'))
+        # load chat memory, which has required parameters for manager construction
+        new_chat_memory = HierarchicalSummaryMemory.from_json(uploaded_settings.get('chat_memory'))
+        # create new memory object
+        new_obj = cls(
+            llm=llm, 
+            prop_ctx=new_chat_memory.prop_ctx,
+            n_levels=new_chat_memory.n_levels,
+            prop_level=new_chat_memory.prop_level
+            )
+        # load chat thread
+        new_obj.chat_thread = HierarchicalSummaryThread.from_json(uploaded_settings.get('chat_thread'))
+        # load chat memory
+        new_obj.chat_memory = new_chat_memory
+        # return object
+        return new_obj
+
+class HierarchicalSummaryThread(ChatThread):
+    """
+    Specialized chat thread that includes summary messages interspersed amongst the
+    usual chat messages.
+    """
+
+    def __init__(self, session_id):
+        """
+        Create a new empty thread with a session ID.
+
+        Args:
+        session_id: A unique identifier for this thread, no particular format required
+        """
+        super().__init__(session_id=session_id)
+        # set default summary 'user'
+        self.summary_role = "summary"
+    
+    def get_summarized_thread(self):
+        """
+        Gets the current top-level messages in this thread, including the system
+        prompt, if any. Messages which have been summarized are not returned, 
+        including summaries which have themselves been summarized.
+
+        Returns: only the top-level messages as a list of message dicts
+        """
+        top_msgs = []
+        current_level = 0
+
+        for msg in reversed(self.messages):
+            # get the summary level, if present
+            # if absent, set to 0 so message is dropped if we're in a higher summary level
+            msg_level = msg.get('level', default=0)
+            if msg_level == current_level:
+                # message is on the current summary level, so add it
+                top_msgs.append(msg)
+            elif msg_level > current_level:
+                # we've hit the start of a higher summary level
+                top_msgs.append(msg)
+                current_level = msg_level
+        
+        # we assembled these backwards, so flip them around before returning
+        return top_msgs.reverse()
+    
+    def format_readable(self):
+        """
+        Convert all messages in this thread into a human-readable and editable
+        format. Message roles are displayed in curly brackets: {{role}} with
+        message text following. Leading and trailing whitespace are ignored.
+        For summary messages, the summary level is appended to the summary role
+        with a colon: {{summary_role:level}}.
+        """
+        result = ""
+        for i in range(0, len(self.messages)):
+            msg = self.messages[i]
+            if msg['role'] == self.summary_role:
+                # put in summary level
+                result += "{{" + msg['role'] + ":" + msg['level'] + "}}\n" + msg['content'] + "\n"
+            else:
+                # just do normal role formatting
+                result += "{{" + msg['role'] + "}}\n" + msg['content'] + "\n"
+        return result
+
+    def import_readable(self, formatted_messages:str):
+        """
+        Parse messages exported by format_readable and use them to replace any
+        existing messages in this chat session.
+
+        Args:
+        formatted_messages (str): The formatted messages to be parsed.
+        """
+        # call super method to parse the text
+        super().import_readable(formatted_messages=formatted_messages)
+        # now we need to go through and pull out summary levels
+        for msg in self.messages:
+            role = msg['role']
+            # if this is a summary
+            if role.startswith(self.summary_role):
+                parts = role.split(sep=":", maxsplit=1)
+                # update role without the level
+                msg['role'] = parts[0].strip()
+                # add the level as an integer
+                msg['level'] = int(parts[1])
+
+    def to_json(self):
+        """
+        Write this object out as a JSON object.
+
+        Returns: a string containing the JSON object
+        """
+        # define state to save
+        settings_to_download = {"session_id": self.session_id,
+                                "system_prompt": self.system_prompt,
+                                "messages": self.messages,
+                                "user_role": self.user_role,
+                                "ai_role": self.ai_role,
+                                "summary_role": self.summary_role,
+                                "archived_messages": self.archived_messages
+                                }
+        # dump it to a JSON file
+        return json.dumps(settings_to_download)
+
+    @classmethod
+    def from_json(cls, json_data):
+        """
+        Load saved session state from a JSON object.
+        Args:
+        json_data (str|file): JSON object or file containing session data
+
+        Returns: a new ChatSession object initialized from the JSON data
+        """
+        # load saved state
+        if type(json_data) == str:
+            uploaded_settings = json.loads(json_data)
+        else:
+            uploaded_settings = json.load(json_data)
+        # create new thread object
+        new_obj = cls(session_id=uploaded_settings.get('session_id'))
+        # load system prompt
+        new_obj.system_prompt = uploaded_settings.get('system_prompt')
+        # load messages
+        new_obj.messages = uploaded_settings.get('messages')
+        # load user role
+        new_obj.user_role = uploaded_settings["user_role"]
+        # load AI role
+        new_obj.ai_role = uploaded_settings["ai_role"]
+        # load summary role
+        new_obj.summary_role = uploaded_settings['summary_role']
+        # load archived messages
+        new_obj.archived_messages = uploaded_settings.get('archived_messages')
+        # return object
+        return new_obj
+
 class HierarchicalSummaryMemory(ChatMemory):
     """
     Manages chat memory using a similar mechanism to the one used by perchance.ai.
@@ -631,3 +867,14 @@ class HierarchicalSummaryMemory(ChatMemory):
             message of the chat thread.
         """
         pass
+
+    def _chars_to_tokens(self, text:str):
+        """
+        Extremely rough estimation of tokens in a string (~3.5 chars/token).
+
+        Args:
+        text (str): the text to be estimated
+
+        Returns: the approximate number of tokens
+        """
+        return max(1, len(text)/3.5)
