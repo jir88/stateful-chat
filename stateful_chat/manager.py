@@ -833,41 +833,273 @@ class HierarchicalSummaryMemory(ChatMemory):
     summarized and added to the next higher summary level. This process is applied to
     all summary levels as needed. The top level is a single summary message. Lower 
     level summaries are merged into this one instead of adding more.
+
+    This class keeps track of all message summaries, the messages that they summarized,
+    and the chat message index where the last summarized message is located.
     """
 
-    def __init__(self, llm, prop_ctx=0.8, n_levels=3, prop_level=0.5):
+    def __init__(
+        self, summary_llm, chat_thread, 
+        prop_ctx:float=0.8,
+        prop_summary:float=0.5,
+        n_levels:int=3,
+        n_tok_summarize:int=1024):
         """
         Construct a new memory object.
 
         Args:
-        llm (LLM): the LLM model to use when generating summaries
-        prop_ctx (double): the proportion of maximum allotted context that a summary
-            level may use up before triggering a higher-level summary.
-        n_levels (int): the number of summary levels to use
-        prop_level (double): the proportion of each level allotted to higher-level
-            summary messages
+        summary_llm (LLM): the LLM model to use when generating summaries. NOTE: make
+            sure this model has the same allocated context window size as the main LLM!
+        chat_thread (ChatThread): the chat thread associated with this memory object
+        prop_ctx (float): the proportion of the total context window that summaries
+            plus un-summarized messages may use up before triggering a higher-level
+            summary.
+        prop_summary (float): The proportion of a message/summary level that can
+            be occupied by messages/summaries of higher level. Each summary
+            level is allocated prop_summary of the context alloted to the next higher
+            level (total context window for original thread messages).
+        n_levels (int): the maximum number of summary levels to use
+        n_tok_summarize (int): the target number of tokens to summarize in one pass.
+            If this corresponds to less than one message, that whole message will be
+            summarized.
         """
-        self.llm = llm
+        self.summary_llm = summary_llm
+        self.chat_thread = chat_thread
         self.prop_ctx = prop_ctx
+        self.prop_summary = prop_summary
         self.n_levels = n_levels
-        self.prop_level = prop_level
-        # messages are stored as a list of dicts with index, role, and content, plus
-        # a summary level keyword
+        self.n_tok_summarize = n_tok_summarize
+        # summaries are stored as a list of dicts with summary level, the actual
+        # messages (or lower-level summaries) that were summarized, and the index
+        # of the final summarized message in the full chat thread
         self.all_memory = []
+        # summaries which have been collapsed into the top-level summary go here
+        self.archived_memory = []
 
-    def add_messages(self, msgs, context=None):
+    def update_all_memory(self):
         """
-        Add a set of messages to memory. The messages will be summarized together and will
-        also be used to update the full summary. Finally, the entity list will be updated.
+        Update memory so that all message levels fit within their corresponding
+        token allotments. If the raw messages themselves are too big, the oldest
+        messages will be summarized and archived. Note that this process only 
+        summarizes the oldest n_tok_summarize tokens of each level (rounded up to
+        the next message), so one or more levels may still be 'over-budget' afterwards.
+        """
+        # first memory will be in the highest current level
+        if len(self.all_memory) > 0:
+            current_level = self.all_memory[0]['level']
+        else:
+            # no memories, so we're at level 0 (raw messages)
+            current_level = 0
+        
+        # tokens occupied by higher levels of summary
+        higher_level_tokens = 0
+        
+        # the index of the first summary we will be summarizing
+        # starts at 0, then updated as we finish handling each level
+        start_summ_index = 0
+
+        # now iterate through the levels until we hit the raw message level
+        while current_level > 0:
+            # find index of first summary in this level
+            start_summ_index = self._get_index_of_first_summary_in_level(level=current_level)
+            # is this level too big?
+            level_allowance = self.summary_llm.sampling_options['num_ctx']*self.prop_ctx*self.prop_summary**current_level
+            current_level_tokens = self._summary_level_size(level=current_level)
+            if (higher_level_tokens + current_level_tokens) >= level_allowance:
+                # if the next-to-highest summary level is too big, we include the top level summary
+                if current_level == (self.n_levels - 1) and self.all_memory[0]['level'] == self.n_levels:
+                    # summarizing both the existing top-level summary and part of the
+                    # next level down into a new top-level summary
+                    idx_to_summarize = [0]
+                    idx_to_summarize.extend(self._get_summary_indices_in_level(level=current_level))
+                else:
+                    # normally just summarizing within the current level
+                    idx_to_summarize = self._get_summary_indices_in_level(level=current_level)
+                # get messages within level that we are going to summarize
+                lim_idx = self._get_messages_with_token_size(
+                    msgs=[self.all_memory[i] for i in idx_to_summarize],
+                    n_tok=level_allowance - higher_level_tokens
+                )
+                idx_to_summarize = idx_to_summarize[slice(lim_idx+1)]
+                # summarize the messages
+                summarized_messages = [self.all_memory[i] for i in idx_to_summarize]
+                new_top_summary = self._summarize_messages(
+                    messages=summarized_messages,
+                    prior_summaries=self.all_memory[:start_summ_index]
+                )
+                # put old summary messages in archive
+                self.archived_memory.extend(summarized_messages)
+                # delete from active summaries
+                for i in idx_to_summarize:
+                    del self.all_memory[i]
+                # insert new summary
+                nts_dict = {
+                    # make sure updated top-level summaries keep the same level
+                    'level': min(current_level + 1, self.n_levels),
+                    # last message index of the last summary in this summary
+                    'msg_idx': max([s['msg_idx'] for s in summarized_messages]),
+                    'content': new_top_summary
+                }
+                self.all_memory.insert(
+                    # replace the first summarized index
+                    index=idx_to_summarize[0],
+                    object=nts_dict
+                )
+            # add current level's remaining tokens to the cumulative total
+            higher_level_tokens += self._summary_level_size(level=current_level)
+            # move to next level down
+            current_level -= 1
+
+        # now we look at the raw messages
+        # index of first summary in this level is the end of the memory list
+        start_summ_index = len(self.all_memory)
+        # is message level too big?
+        level_allowance = self.summary_llm.sampling_options['num_ctx']*self.prop_ctx
+        # how long is the current message thread?
+        current_level_tokens = 0
+        for summary in self.chat_thread.messages:
+            current_level_tokens += self._chars_to_tokens(summary['content'])
+        # if it is too big
+        if (higher_level_tokens + current_level_tokens) >= level_allowance:
+            # index of last message that fills up our summarization budget
+            lim_idx = self._get_messages_with_token_size(
+                msgs=self.chat_thread.messages,
+                n_tok=level_allowance - higher_level_tokens
+            )
+            summarized_messages = self.chat_thread.messages[slice(lim_idx+1)]
+            # summarize
+            new_top_summary = self._summarize_messages(
+                messages=summarized_messages,
+                prior_summaries=self.all_memory
+            )
+            # archive these messages from the chat thread
+            self.chat_thread.archive_messages(
+                start_idx=0,
+                stop_idx=lim_idx+1
+            )
+            # insert new first-level summary
+            nts_dict = {
+                'level': 1,
+                # last message index of the last message in this summary
+                'msg_idx': round(summarized_messages[-1]['id']),
+                'content': new_top_summary
+            }
+            # new summary goes at the end
+            self.all_memory.append(nts_dict)
+    
+    summarization_prompt = """You are summarizing a long series of messages into a concise but accurate summary.
+    You will be given any relevant prior context and the user will provide the messages to be summarized. You
+    must only summarize the content of the messages themselves, not the prior context. Make sure to include
+    all important details.
+
+    Prior context:
+    {context}
+
+    Now the user will provide you with the messages to be summarized. Respond only with a single-paragraph summary, no
+    additional commentary."""
+
+    def _summarize_messages(self, messages:list, prior_summaries:list=[]):
+        """
+        Summarize a list of messages, optionally including a list of older summaries
+        as context.
 
         Args:
-        msgs (list[dict]): a list of dicts, where each dict has the message ('content' key),
-            the 'role' key, a 'tokens' key with the number of tokens in the message, plus any other useful metadata.
-        context (str): a short description of the chat context. Usually, this is the system
-            message of the chat thread.
-        """
-        pass
+        messages (list): a list of messages to summarize
+        prior_summaries (list): a list of older summaries to be used as context when summarizing
 
+        Returns: the summary
+        """
+        # if no prior context, just put 'None' in as a placeholder
+        if len(prior_summaries) == 0:
+            prior_summaries = ["No prior context."]
+        
+        # construct system prompt
+        sys_prompt = {
+            'role': 'system',
+            'content': self.summarization_prompt.format(context="\n\n".join(prior_summaries))
+        }
+        user_prompt = {
+            'role': 'user',
+            'content': "Please summarize the following messages:\n\n" + "\n\n".join(messages)
+        }
+        # generate the summary
+        llm_response = self.summary_llm.generate_instruct(
+            messages=[sys_prompt, user_prompt],
+            respond=True,
+            response_role="assistant",
+            stream=False
+        )
+        return llm_response['response']
+
+    def _get_index_of_first_summary_in_level(self, level:int):
+        if len(self.all_memory) == 0:
+            return 0
+        for i in range(len(self.all_memory)):
+            if self.all_memory[i]['level'] == level:
+                return i
+        # no summaries at this level
+        return -1
+
+    def _get_summaries_in_level(self, level:int):
+        """
+        Get all the summaries of a given level, in order.
+
+        Returns: a list of all the summaries in that level
+        """
+        if len(self.all_memory) == 0:
+            return []
+        level_msgs = []
+        for summary in self.all_memory:
+            if summary['level'] == level:
+                level_msgs.append(summary)
+        return level_msgs
+    
+    def _get_summary_indices_in_level(self, level:int):
+        """
+        Get the indices of all the summaries of a given level, in order.
+
+        Returns: a list of the summary indicies in the memory list
+        """
+        if len(self.all_memory) == 0:
+            return []
+        level_idx = []
+        for idx in range(len(self.all_memory)):
+            if self.all_memory[idx]['level'] == level:
+                level_idx.append(idx)
+        return level_idx
+
+    def _get_messages_with_token_size(self, msgs, n_tok:int):
+        """
+        Calculates the index of the first message in this list in which
+        the cumulative number of tokens exceeds n_tok, or len(msgs) if
+        the total size of all messages is less than n_tok.
+        """
+        cum_tokens = 0
+
+        for i in range(len(msgs)):
+            cum_tokens += self._chars_to_tokens(text=msgs[i]['content'])
+            if cum_tokens >= n_tok:
+                # this is the message where we go over the token limit
+                return i
+        return len(msgs)
+    
+    def _summary_level_size(self, level:int):
+        """
+        Estimate the number of tokens in all summaries of a given level.
+
+        Args:
+        level (int): the summary level of interest
+
+        Returns: the approximate number of tokens.
+        """
+        if len(self.all_memory) == 0:
+            return 0
+        level_size = 0
+        for summary in self.all_memory:
+            if summary['level'] == level:
+                level_size += self._chars_to_tokens(summary['content'])
+        return level_size
+    
     def _chars_to_tokens(self, text:str):
         """
         Extremely rough estimation of tokens in a string (~3.5 chars/token).
