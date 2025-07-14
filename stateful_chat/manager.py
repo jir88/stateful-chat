@@ -631,10 +631,13 @@ class HierarchicalSummaryManager(StatefulChatManager):
 
         Returns: a generator if streaming or the response text if not streaming
         """
+        #TODO: should I put summaries in the system prompt or as 'messages'?
+        # or as some kind of 'previously on AI TV...' style single message?
         # make the system prompt
         sys_prompt = self.compile_system_prompt().strip()
         all_msgs = [{ 'role': "system", 'content': sys_prompt }]
         # add in-context messages after sys prompt
+        #FIXME: get the summary info from memory, not the chat thread
         all_msgs.extend(self.chat_thread.get_summarized_thread())
         # generate response using current thread's AI role
         return self.llm.generate_instruct(messages=all_msgs,
@@ -647,6 +650,7 @@ class HierarchicalSummaryManager(StatefulChatManager):
         """
         Continue generating from the end of the most recent message.
         """
+        #TODO: update like 'generate_response' to handle summaries properly
         # make the system prompt
         sys_prompt = self.compile_system_prompt().strip()
         all_msgs = [{ 'role': "system", 'content': sys_prompt }]
@@ -743,6 +747,7 @@ class HierarchicalSummaryThread(ChatThread):
         For summary messages, the summary level is appended to the summary role
         with a colon: {{summary_role:level}}.
         """
+        # FIXME: I moved summaries out of the chat thread itself. How to handle?
         result = ""
         for i in range(0, len(self.messages)):
             msg = self.messages[i]
@@ -762,6 +767,7 @@ class HierarchicalSummaryThread(ChatThread):
         Args:
         formatted_messages (str): The formatted messages to be parsed.
         """
+        # FIXME: I moved summaries out of the chat thread. Also summaries need to keep proper indices.
         # call super method to parse the text
         super().import_readable(formatted_messages=formatted_messages)
         # now we need to go through and pull out summary levels
@@ -1011,16 +1017,16 @@ class HierarchicalSummaryMemory(ChatMemory):
         """
         # if no prior context, just put 'None' in as a placeholder
         if len(prior_summaries) == 0:
-            prior_summaries = ["No prior context."]
+            prior_summaries = [{ 'content': "No prior context." }]
         
         # construct system prompt
         sys_prompt = {
             'role': 'system',
-            'content': self.summarization_prompt.format(context="\n\n".join(prior_summaries))
+            'content': self.summarization_prompt.format(context="\n\n".join([ps['content'] for ps in prior_summaries]))
         }
         user_prompt = {
             'role': 'user',
-            'content': "Please summarize the following messages:\n\n" + "\n\n".join(messages)
+            'content': "Please summarize the following messages:\n\n" + "\n\n".join([m['content'] for m in messages])
         }
         # generate the summary
         llm_response = self.summary_llm.generate_instruct(
