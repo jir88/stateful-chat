@@ -22,7 +22,7 @@ llm = scl.OpenAILLM(model="gemma-3n-E4B-it-UD-Q4_K_XL-cpu", instruct_fmt=inst_fm
 
 # construct a heirarchical chat and memory
 h_chat = scm.HierarchicalSummaryThread(session_id="1")
-h_memory = scm.HierarchicalSummaryMemory(summary_llm=llm, chat_thread=h_chat, n_tok_summarize=512)
+h_memory = scm.HierarchicalSummaryMemory(summary_llm=llm, chat_thread=h_chat, n_tok_summarize=1024)
 
 # combine archived and active messages for this test
 all_messages = []
@@ -37,8 +37,10 @@ for msg in all_messages:
     h_memory.update_all_memory()
     print(f"Memory has {len(h_memory.all_memory)} active memories and {len(h_memory.archived_memory)} archived memories.")
     if n_memories != (len(h_memory.all_memory) + len(h_memory.archived_memory)):
-        print("\nArchived memories:\n\n" + h_memory.archived_memory)
-        print("\nActive memories:\n\n" + h_memory.all_memory)
+        mems = [m['content'] for m in h_memory.archived_memory]
+        print("\nArchived memories:\n\n" + "\n".join(mems))
+        mems = [m['content'] for m in h_memory.all_memory]
+        print("\nActive memories:\n\n" + "\n".join(mems))
         n_memories = (len(h_memory.all_memory) + len(h_memory.archived_memory))
 
 print("Done!")
