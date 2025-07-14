@@ -924,7 +924,7 @@ class HierarchicalSummaryMemory(ChatMemory):
                 # get messages within level that we are going to summarize
                 lim_idx = self._get_messages_with_token_size(
                     msgs=[self.all_memory[i] for i in idx_to_summarize],
-                    n_tok=level_allowance - higher_level_tokens
+                    n_tok=self.n_tok_summarize
                 )
                 idx_to_summarize = idx_to_summarize[slice(lim_idx+1)]
                 # summarize the messages
@@ -970,7 +970,7 @@ class HierarchicalSummaryMemory(ChatMemory):
             # index of last message that fills up our summarization budget
             lim_idx = self._get_messages_with_token_size(
                 msgs=self.chat_thread.messages,
-                n_tok=level_allowance - higher_level_tokens
+                n_tok=self.n_tok_summarize
             )
             summarized_messages = self.chat_thread.messages[slice(lim_idx+1)]
             # summarize
@@ -1036,7 +1036,7 @@ class HierarchicalSummaryMemory(ChatMemory):
             stream=False
         )
         print(llm_response)
-        return llm_response['response']
+        return next(llm_response)['response']
 
     def _get_index_of_first_summary_in_level(self, level:int):
         if len(self.all_memory) == 0:
