@@ -948,8 +948,8 @@ class HierarchicalSummaryMemory(ChatMemory):
                 }
                 self.all_memory.insert(
                     # replace the first summarized index
-                    index=idx_to_summarize[0],
-                    object=nts_dict
+                    idx_to_summarize[0],
+                    nts_dict
                 )
             # add current level's remaining tokens to the cumulative total
             higher_level_tokens += self._summary_level_size(level=current_level)
