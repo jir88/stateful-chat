@@ -398,7 +398,7 @@ class OpenAILLM(LLM):
                 ol_dict['eval_count'] = response.timings['predicted_n']
                 # ollama outputs times in nanoseconds for some reason...
                 ol_dict['eval_duration'] = response.timings['predicted_ms']*1.0e6
-            return ol_dict
+            yield ol_dict
         else:
             for chunk in response:
                 print(chunk)
