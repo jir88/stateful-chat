@@ -1035,6 +1035,7 @@ class HierarchicalSummaryMemory(ChatMemory):
             response_role="assistant",
             stream=False
         )
+        print(llm_response)
         return llm_response['response']
 
     def _get_index_of_first_summary_in_level(self, level:int):

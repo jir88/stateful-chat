@@ -22,7 +22,7 @@ llm = scl.OpenAILLM(model="gemma-3n-E4B-it-UD-Q4_K_XL-cpu", instruct_fmt=inst_fm
 
 # construct a heirarchical chat and memory
 h_chat = scm.HierarchicalSummaryThread(session_id="1")
-h_memory = scm.HierarchicalSummaryMemory(summary_llm=llm, chat_thread=h_chat)
+h_memory = scm.HierarchicalSummaryMemory(summary_llm=llm, chat_thread=h_chat, n_tok_summarize=512)
 
 # combine archived and active messages for this test
 all_messages = []

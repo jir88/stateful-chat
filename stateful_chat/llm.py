@@ -333,7 +333,9 @@ class OpenAILLM(LLM):
         self.model = model
         self.client = openai.OpenAI(
             api_key="placeholder",
-            base_url="http://127.0.0.1:8080/v1"
+            base_url="http://127.0.0.1:8080/v1",
+            timeout=300,
+            max_retries=10
         )
         # if no options specified, we provide some reasonable defaults
         if sampling_options is None:
@@ -384,10 +386,19 @@ class OpenAILLM(LLM):
         )
         print("Streaming?")
         if not stream:
+            # only one response but we have to stream it for some reason
+            # chunk = next(response)
             print(response.choices[0])
-            return {
-                'response': next(response).choices[0].text
+            ol_dict = {
+                'response': response.choices[0].text
             }
+            # add generation speed if available
+            if response.usage is not None:
+                ol_dict['prompt_eval_count'] = response.timings['prompt_n']
+                ol_dict['eval_count'] = response.timings['predicted_n']
+                # ollama outputs times in nanoseconds for some reason...
+                ol_dict['eval_duration'] = response.timings['predicted_ms']*1.0e6
+            return ol_dict
         else:
             for chunk in response:
                 print(chunk)
@@ -438,7 +449,8 @@ class OpenAILLM(LLM):
             fmt_msgs = self.instruct_format.format_messages(messages, bot=True, eot=False,
                                                             append_continuation=False)
         # now generate using regular completion endpoint
-        return self.generate(prompt=fmt_msgs, stream=stream)
+        result = self.generate(prompt=fmt_msgs, stream=stream)
+        return result
 
     def to_json(self):
         """
