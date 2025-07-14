@@ -385,8 +385,8 @@ class OpenAILLM(LLM):
         print("Streaming?")
         if not stream:
             print(response.choices[0])
-            yield {
-                'response': response.choices[0].text
+            return {
+                'response': next(response).choices[0].text
             }
         else:
             for chunk in response:
@@ -437,7 +437,7 @@ class OpenAILLM(LLM):
         else:
             fmt_msgs = self.instruct_format.format_messages(messages, bot=True, eot=False,
                                                             append_continuation=False)
-        print(self.generate)
+        # now generate using regular completion endpoint
         return self.generate(prompt=fmt_msgs, stream=stream)
 
     def to_json(self):
