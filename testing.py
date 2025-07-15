@@ -21,7 +21,7 @@ sampling_options = {
 llm = scl.OpenAILLM(model="gemma-3n-E4B-it-UD-Q4_K_XL-cpu", instruct_fmt=inst_fmt, sampling_options=sampling_options)
 
 # construct a heirarchical chat and memory
-h_chat = scm.HierarchicalSummaryThread(session_id="1")
+h_chat = scm.ChatThread(session_id="1")
 h_memory = scm.HierarchicalSummaryMemory(
     summary_llm=llm, 
     chat_thread=h_chat,
@@ -50,4 +50,7 @@ for msg in all_messages:
         print("\nActive memories:\n\n" + "\n".join(mems))
         n_memories = (len(h_memory.all_memory) + len(h_memory.archived_memory))
 
+print("Saving results...")
+with open("C:\\Users\\John Robinson\\Downloads\\logs\\pv-37-b-h.json", mode='w') as f:
+    f.write(h_memory.to_json())
 print("Done!")
