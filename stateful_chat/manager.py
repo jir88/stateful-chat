@@ -936,7 +936,8 @@ class HierarchicalSummaryMemory(ChatMemory):
                 # put old summary messages in archive
                 self.archived_memory.extend(summarized_messages)
                 # delete from active summaries
-                for i in idx_to_summarize:
+                # have to work in reverse order so indices don't change while deleting
+                for i in reversed(idx_to_summarize):
                     del self.all_memory[i]
                 # insert new summary
                 nts_dict = {
