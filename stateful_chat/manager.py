@@ -1035,8 +1035,8 @@ class HierarchicalSummaryMemory(ChatMemory):
             response_role="assistant",
             stream=False
         )
-        print(llm_response)
-        return next(llm_response)['response']
+        # pull the first/only result off the generator and strip whitespace
+        return next(llm_response)['response'].strip()
 
     def _get_index_of_first_summary_in_level(self, level:int):
         if len(self.all_memory) == 0:
@@ -1117,3 +1117,55 @@ class HierarchicalSummaryMemory(ChatMemory):
         Returns: the approximate number of tokens
         """
         return max(1, len(text)/3.5)
+
+    def to_json(self):
+        """
+        Write this object out as a JSON object.
+
+        Returns: a string containing the JSON object
+        """
+        # define state to save
+        settings_to_download = {"summary_llm": self.summary_llm.to_json(),
+                                "chat_thread": self.chat_thread.to_json(),
+                                "prop_ctx": self.prop_ctx,
+                                "prop_summary": self.prop_summary,
+                                "n_levels": self.n_levels,
+                                "n_tok_summarize": self.n_tok_summarize,
+                                "all_memory": self.all_memory,
+                                "archived_memory": self.archived_memory
+                                }
+        # dump it to a JSON file
+        return json.dumps(settings_to_download)
+
+    @classmethod
+    def from_json(cls, json_data):
+        """
+        Load saved session state from a JSON object.
+        Args:
+        json_data (str): JSON object or file containing session data
+
+        Returns: a new ChatSession object initialized from the JSON data
+        """
+        # load saved state
+        if type(json_data) == str:
+            uploaded_settings = json.loads(json_data)
+        else:
+            uploaded_settings = json.load(json_data)
+        # initialize LLM
+        llm = OpenAILLM.from_json(uploaded_settings.get('summary_llm'))
+        # load associated chat thread
+        ct = ChatThread.from_json(uploaded_settings.get('chat_thread'))
+        # create new memory object
+        new_obj = cls(summary_llm=llm, chat_thread=ct)
+        # load summary sizing parameters
+        new_obj.prop_ctx = uploaded_settings["prop_ctx"]
+        new_obj.prop_summary = uploaded_settings["prop_summary"]
+        new_obj.n_levels = uploaded_settings["n_levels"]
+        new_obj.n_tok_summarize = uploaded_settings["n_tok_summarize"]
+        # load active summaries
+        new_obj.all_memory = uploaded_settings["all_memory"]
+        # load archived summaries
+        new_obj.archived_memory = uploaded_settings["archived_memory"]
+        
+        # return object
+        return new_obj
