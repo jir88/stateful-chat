@@ -631,14 +631,10 @@ class HierarchicalSummaryManager(StatefulChatManager):
 
         Returns: a generator if streaming or the response text if not streaming
         """
-        #TODO: should I put summaries in the system prompt or as 'messages'?
-        # or as some kind of 'previously on AI TV...' style single message?
-        # make the system prompt
         sys_prompt = self.compile_system_prompt().strip()
         all_msgs = [{ 'role': "system", 'content': sys_prompt }]
         # add in-context messages after sys prompt
-        #FIXME: get the summary info from memory, not the chat thread
-        all_msgs.extend(self.chat_thread.get_summarized_thread())
+        all_msgs.extend(self.chat_thread.messages)
         # generate response using current thread's AI role
         return self.llm.generate_instruct(messages=all_msgs,
                                           respond=True,
@@ -650,17 +646,29 @@ class HierarchicalSummaryManager(StatefulChatManager):
         """
         Continue generating from the end of the most recent message.
         """
-        #TODO: update like 'generate_response' to handle summaries properly
         # make the system prompt
         sys_prompt = self.compile_system_prompt().strip()
         all_msgs = [{ 'role': "system", 'content': sys_prompt }]
         # add in-context messages after sys prompt
-        all_msgs.extend(self.chat_thread.get_summarized_thread())
+        all_msgs.extend(self.chat_thread.messages)
         # continue generating from end of last message
         return self.llm.generate_instruct(messages=all_msgs,
                                           respond=False,
                                           stream=stream
                                           )
+
+    def compile_system_prompt(self):
+        """
+        Combine raw prompt and summaries into a full system prompt.
+        """
+        # start with the system prompt for the current chat thread, if any
+        full_sys_prompt = ""
+        if self.chat_thread.system_prompt is not None:
+            full_sys_prompt += self.chat_thread.system_prompt.strip()
+        # add top-level summary from memory
+        if self.chat_memory.full_summary is not None:
+            full_sys_prompt += "\n\nSummary of all previous messages:\n" + "\n".join(self.chat_memory.all_memory)
+        return full_sys_prompt
 
     @classmethod
     def from_json(cls, json_data):
