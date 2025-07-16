@@ -598,7 +598,7 @@ class HierarchicalSummaryManager(StatefulChatManager):
     perchance.ai.
     """
 
-    def __init__(self, llm:LLM, prop_ctx=0.8, n_levels=3, prop_level=0.5):
+    def __init__(self, llm:LLM, summary_llm:LLM=None, prop_ctx=0.8, n_levels=3, prop_level=0.5):
         """
         Create a new chat manager with a given large language model back-end.
 
@@ -611,11 +611,14 @@ class HierarchicalSummaryManager(StatefulChatManager):
             summary messages
         """
         self.llm = llm
+        # if no summary LLM specified, use main one
+        if summary_llm is None:
+            summary_llm = llm
         # create empty chat thread
-        self.chat_thread = HierarchicalSummaryThread(str(uuid.uuid4()))
+        self.chat_thread = ChatThread(str(uuid.uuid4()))
         # create empty memory store
         self.chat_memory = HierarchicalSummaryMemory(
-            llm=llm,
+            llm=summary_llm,
             prop_ctx=prop_ctx,
             n_levels=n_levels,
             prop_level=prop_level
