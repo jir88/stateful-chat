@@ -15,10 +15,10 @@ st.title("Stateful Chatbot")
 if "chat_session" not in st.session_state:
     # set up LLM backend
     llm = scl.OpenAILLM(model="gemma-3-4B-it-UD-Q4_K_XL-cpu")
+    # separate LLM for summarizing
+    summary_llm = scl.OpenAILLM(model="gemma-3-4B-it-UD-Q4_K_XL-cpu")
     # initialize session manager
-    cs = scm.StatefulChatManager(llm)
-    # TODO: keep using stop words?
-    #cs.stop_words = ["<|begin_of_text|>","<|start_header_id|>","<|eot_id|>"]
+    cs = scm.HierarchicalSummaryManager(llm=llm, summary_llm=summary_llm)
     cs.chat_thread.system_prompt = ""
     st.session_state.chat_session = cs
 
@@ -45,7 +45,7 @@ def load_state():
     if session_file is None:
         st.warning("No settings file selected!")
         return
-    st.session_state.chat_session = scm.StatefulChatManager.from_json(session_file)
+    st.session_state.chat_session = scm.HierarchicalSummaryManager.from_json(session_file)
     # set the instruct format properly in the select box
     st.session_state.inst_fmt_box = st.session_state.chat_session.llm.instruct_format.name
 
@@ -68,7 +68,6 @@ if "instruct_formats" not in st.session_state:
     st.session_state.instruct_names = [fmt.name for fmt in st.session_state.instruct_formats]
 
 def get_response():
-    #o_gen = st.session_state.chat_session.get_rag_response(n_msg=2, rag_thresh=0.3, n_results=1, stream=True)
     o_gen = st.session_state.chat_session.get_response(stream=True)
      # make wrapper
     def ogen_wrapper(o_gen):
@@ -183,44 +182,38 @@ with tab_main:
                                          key = "session_saver",
                                          help="Click to Download Current Settings")
     
-    
-    # manually generate summary of N oldest messages
-    num_summ = st.number_input("Number of messages to summarize and archive:",
-                               min_value=2, 
-                               max_value=max([2, len(st.session_state.chat_session.chat_thread.messages)]),
-                               value=2, step=1)
-    if st.button(label="Summarize"):
-        # tell state manager to commit these messages to memory and archive them
-        st.session_state.chat_session.messages_to_memory(num_summ)
+    if st.button(label="Update memory"):
+        # tell state manager to update memory, ensuring all levels are within limits
+        st.session_state.chat_session.chat_memory.update_all_memory()
 
 # ====================== Memory Tab ========================
 
 # NOTE: this version assumes that manager is using LLMSummaryMemory!!!
 with tab_mem:
-    st.session_state.chat_session.chat_memory.init_sys_prompt = st.text_area("Summarization system prompt:", st.session_state.chat_session.chat_memory.init_sys_prompt, height = 100)
+    st.session_state.chat_session.chat_memory.summarization_prompt = st.text_area("Summarization system prompt:", st.session_state.chat_session.chat_memory.summarization_prompt, height = 100)
     
-    st.session_state.chat_session.chat_memory.prompt_full_summary = st.text_area("Full summary prompt:", st.session_state.chat_session.chat_memory.prompt_full_summary, height = 100)
-    if st.session_state.chat_session.chat_memory.full_summary is None:
-        st.write("Full summary: None")
-    else:
-        st.session_state.chat_session.chat_memory.full_summary = st.text_area("Full summary:", st.session_state.chat_session.chat_memory.full_summary, height = 150)
+    # st.session_state.chat_session.chat_memory.prompt_full_summary = st.text_area("Full summary prompt:", st.session_state.chat_session.chat_memory.prompt_full_summary, height = 100)
+    # if st.session_state.chat_session.chat_memory.full_summary is None:
+    #     st.write("Full summary: None")
+    # else:
+    #     st.session_state.chat_session.chat_memory.full_summary = st.text_area("Full summary:", st.session_state.chat_session.chat_memory.full_summary, height = 150)
     
-    st.session_state.chat_session.chat_memory.prompt_msg_summary = st.text_area("Message summary prompt:", st.session_state.chat_session.chat_memory.prompt_msg_summary, height = 100)
-    if len(st.session_state.chat_session.chat_memory.message_summaries) == 0:
-        st.write("Message chunk summary: None")
-    else:
-        original_memory = st.session_state.chat_session.chat_memory.message_summaries[-1]['content']
-        edited_memory = st.text_area("Message chunk summary:", original_memory, height = 150)
-        # update memory if it has been changed
-        if original_memory != edited_memory:
-            mem_id = len(st.session_state.chat_session.chat_memory.message_summaries) - 1
-            st.session_state.chat_session.chat_memory.update_memory(mem_id=mem_id, mem_content=edited_memory)
+    # st.session_state.chat_session.chat_memory.prompt_msg_summary = st.text_area("Message summary prompt:", st.session_state.chat_session.chat_memory.prompt_msg_summary, height = 100)
+    # if len(st.session_state.chat_session.chat_memory.message_summaries) == 0:
+    #     st.write("Message chunk summary: None")
+    # else:
+    #     original_memory = st.session_state.chat_session.chat_memory.message_summaries[-1]['content']
+    #     edited_memory = st.text_area("Message chunk summary:", original_memory, height = 150)
+    #     # update memory if it has been changed
+    #     if original_memory != edited_memory:
+    #         mem_id = len(st.session_state.chat_session.chat_memory.message_summaries) - 1
+    #         st.session_state.chat_session.chat_memory.update_memory(mem_id=mem_id, mem_content=edited_memory)
     
-    st.session_state.chat_session.chat_memory.prompt_entity_list = st.text_area("Entity list prompt:", st.session_state.chat_session.chat_memory.prompt_entity_list, height = 100)
-    if st.session_state.chat_session.chat_memory.entity_list is None:
-        st.write("Entity list: None")
-    else:
-        st.session_state.chat_session.chat_memory.entity_list = st.text_area("Entity list:", st.session_state.chat_session.chat_memory.entity_list, height = 150)
+    # st.session_state.chat_session.chat_memory.prompt_entity_list = st.text_area("Entity list prompt:", st.session_state.chat_session.chat_memory.prompt_entity_list, height = 100)
+    # if st.session_state.chat_session.chat_memory.entity_list is None:
+    #     st.write("Entity list: None")
+    # else:
+    #     st.session_state.chat_session.chat_memory.entity_list = st.text_area("Entity list:", st.session_state.chat_session.chat_memory.entity_list, height = 150)
 
 # ====================== Database Tab ========================
 
@@ -262,25 +255,25 @@ with tab_settings:
     st.session_state.chat_session.llm.sampling_options = json.loads(edited_text)
     
     # memory LLM model to use
-    llm_name = st.text_input("Memory LLM:", st.session_state.chat_session.chat_memory.llm.model,
+    llm_name = st.text_input("Memory LLM:", st.session_state.chat_session.chat_memory.summary_llm.model,
                             key='mem_llm_name')
-    if llm_name != st.session_state.chat_session.chat_memory.llm.model:
+    if llm_name != st.session_state.chat_session.chat_memory.summary_llm.model:
         # keep original parameters
-        samp_opts = st.session_state.chat_session.chat_memory.llm.sampling_options
-        inst_fmt = st.session_state.chat_session.chat_memory.llm.instruct_format
+        samp_opts = st.session_state.chat_session.chat_memory.summary_llm.sampling_options
+        inst_fmt = st.session_state.chat_session.chat_memory.summary_llm.instruct_format
         # initialize new LLM
         # st.session_state.chat_session.chat_memory.llm = scl.OllamaLLM(model=llm_name,
         #                                                   sampling_options=samp_opts,
         #                                                   instruct_fmt=inst_fmt)
-        st.session_state.chat_session.chat_memory.llm = scl.OpenAILLM(model=llm_name,
+        st.session_state.chat_session.chat_memory.summary_llm = scl.OpenAILLM(model=llm_name,
                                                           sampling_options=samp_opts,
                                                           instruct_fmt=inst_fmt)
 
     # memory model chat format to use
     fmt_name = st.selectbox("Memory LLM instruct format to use:", options=st.session_state.instruct_names, key="mem_inst_fmt_box")
     fmt_idx = st.session_state.instruct_names.index(fmt_name)
-    st.session_state.chat_session.chat_memory.llm.instruct_format = st.session_state.instruct_formats[fmt_idx]
+    st.session_state.chat_session.chat_memory.summary_llm.instruct_format = st.session_state.instruct_formats[fmt_idx]
     # memory LLM sampling parameters
-    formatted_text = json.dumps(st.session_state.chat_session.chat_memory.llm.sampling_options, indent=2)
+    formatted_text = json.dumps(st.session_state.chat_session.chat_memory.summary_llm.sampling_options, indent=2)
     edited_text = st.text_area("Edit memory LLM sampling parameters:", formatted_text, height = 250)
-    st.session_state.chat_session.chat_memory.llm.sampling_options = json.loads(edited_text)
+    st.session_state.chat_session.chat_memory.summary_llm.sampling_options = json.loads(edited_text)
