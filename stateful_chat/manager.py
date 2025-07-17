@@ -598,17 +598,29 @@ class HierarchicalSummaryManager(StatefulChatManager):
     perchance.ai.
     """
 
-    def __init__(self, llm:LLM, summary_llm:LLM=None, prop_ctx=0.8, n_levels=3, prop_level=0.5):
+    def __init__(
+        self, llm:LLM, summary_llm:LLM=None,
+        prop_ctx:float=0.8, prop_summary:float=0.5,
+        n_levels:int=3, n_tok_summarize:int=1024):
         """
         Create a new chat manager with a given large language model back-end.
 
         Args:
         llm (LLM): an LLM object to use
-        prop_ctx (double): the proportion of its maximum allotted context that a summary
-            level may use up before triggering a higher-level summary.
-        n_levels (int): the number of summary levels to use
-        prop_level (double): the proportion of each level allotted to higher-level
-            summary messages
+        summary_llm (LLM): the LLM model to use when generating summaries. NOTE: make
+            sure this model has the same allocated context window size as the main LLM!
+        chat_thread (ChatThread): the chat thread associated with this memory object
+        prop_ctx (float): the proportion of the total context window that summaries
+            plus un-summarized messages may use up before triggering a higher-level
+            summary.
+        prop_summary (float): The proportion of a message/summary level that can
+            be occupied by messages/summaries of higher level. Each summary
+            level is allocated prop_summary of the context alloted to the next higher
+            level (total context window for original thread messages).
+        n_levels (int): the maximum number of summary levels to use
+        n_tok_summarize (int): the target number of tokens to summarize in one pass.
+            If this corresponds to less than one message, that whole message will be
+            summarized.
         """
         self.llm = llm
         # if no summary LLM specified, use main one
@@ -618,10 +630,12 @@ class HierarchicalSummaryManager(StatefulChatManager):
         self.chat_thread = ChatThread(str(uuid.uuid4()))
         # create empty memory store
         self.chat_memory = HierarchicalSummaryMemory(
-            llm=summary_llm,
+            summary_llm=summary_llm,
+            chat_thread=self.chat_thread,
             prop_ctx=prop_ctx,
+            prop_summary=prop_summary,
             n_levels=n_levels,
-            prop_level=prop_level
+            n_tok_summarize=n_tok_summarize
             )
     
     def get_response(self, stream=True):
@@ -669,8 +683,9 @@ class HierarchicalSummaryManager(StatefulChatManager):
         if self.chat_thread.system_prompt is not None:
             full_sys_prompt += self.chat_thread.system_prompt.strip()
         # add top-level summary from memory
-        if self.chat_memory.full_summary is not None:
-            full_sys_prompt += "\n\nSummary of all previous messages:\n" + "\n".join(self.chat_memory.all_memory)
+        if len(self.chat_memory.all_memory) > 0:
+            mems = [m['content'] for m in self.chat_memory.all_memory]
+            full_sys_prompt += "\n\nSummary of all previous messages:\n" + "\n".join(mems)
         return full_sys_prompt
 
     @classmethod
@@ -693,15 +708,17 @@ class HierarchicalSummaryManager(StatefulChatManager):
         llm = OpenAILLM.from_json(uploaded_settings.get('llm'))
         # load chat memory, which has required parameters for manager construction
         new_chat_memory = HierarchicalSummaryMemory.from_json(uploaded_settings.get('chat_memory'))
-        # create new memory object
+        # create new manager object
         new_obj = cls(
-            llm=llm, 
+            llm=llm,
+            summary_llm=new_chat_memory.summary_llm,
             prop_ctx=new_chat_memory.prop_ctx,
+            prop_summary=new_chat_memory.prop_summary,
             n_levels=new_chat_memory.n_levels,
-            prop_level=new_chat_memory.prop_level
+            n_tok_summarize=new_chat_memory.n_tok_summarize
             )
-        # load chat thread
-        new_obj.chat_thread = HierarchicalSummaryThread.from_json(uploaded_settings.get('chat_thread'))
+        # assign chat thread from memory
+        new_obj.chat_thread = new_chat_memory.chat_thread
         # load chat memory
         new_obj.chat_memory = new_chat_memory
         # return object
