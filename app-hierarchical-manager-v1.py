@@ -46,8 +46,9 @@ def load_state():
         st.warning("No settings file selected!")
         return
     st.session_state.chat_session = scm.HierarchicalSummaryManager.from_json(session_file)
-    # set the instruct format properly in the select box
+    # set the instruct formats properly in their select boxes
     st.session_state.inst_fmt_box = st.session_state.chat_session.llm.instruct_format.name
+    st.session_state.mem_inst_fmt_box = st.session_state.chat_session.chat_memory.summary_llm.instruct_format.name
 
 # method to load all available instruct formats so we can offer them to the user
 def load_instruct_formats():
@@ -188,10 +189,34 @@ with tab_main:
 
 # ====================== Memory Tab ========================
 
-# NOTE: this version assumes that manager is using LLMSummaryMemory!!!
+# NOTE: this version assumes that manager is using HierarchicalSummaryMemory!!!
 with tab_mem:
-    st.session_state.chat_session.chat_memory.summarization_prompt = st.text_area("Summarization system prompt:", st.session_state.chat_session.chat_memory.summarization_prompt, height = 100)
+    st.session_state.chat_session.chat_memory.summarization_prompt = st.text_area(
+        "Summarization system prompt:",
+        st.session_state.chat_session.chat_memory.summarization_prompt,
+        height = 200
+        )
     
+    # mode-switching check-box
+    if st.checkbox(label = "Manual memory editing"):
+        # we're using manual mode
+        # convert summaries to text and stick them in a text editor
+        formatted_text = st.session_state.chat_session.chat_memory.format_readable()
+        edited_text = st.text_area("Edit raw summary text:", formatted_text, height = 500)
+        # when the text area changes, put the new version into the session
+        st.session_state.chat_session.chat_memory.import_readable(edited_text)
+    else:
+        # we're in automatic mode
+        # now render conversation history in container
+        with st.container(height=500):
+            # display conversation
+            if len(st.session_state.chat_session.chat_memory.all_memory) > 0:
+                for msg in st.session_state.chat_session.chat_memory.all_memory:
+                    with st.chat_message("Summary"):
+                        st.write("[Level " + str(msg['level']) + "] " + msg['content'])
+        # end chat container
+    # end auto/manual selection
+
     # st.session_state.chat_session.chat_memory.prompt_full_summary = st.text_area("Full summary prompt:", st.session_state.chat_session.chat_memory.prompt_full_summary, height = 100)
     # if st.session_state.chat_session.chat_memory.full_summary is None:
     #     st.write("Full summary: None")
