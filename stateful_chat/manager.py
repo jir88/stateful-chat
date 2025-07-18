@@ -1147,6 +1147,45 @@ class HierarchicalSummaryMemory(ChatMemory):
         """
         return max(1, len(text)/3.5)
 
+    def format_readable(self):
+        """
+        Convert all active summaries into a human-readable and editable
+        format. Summary levels and positions are displayed in curly brackets:
+        {{L<level>@<position>}} with summary text following. Leading and trailing
+        whitespace are stripped.
+        """
+        result = ""
+        for mem in self.all_memory:
+            result += "{{L" + str(mem['level']) + "@" + str(mem['msg_idx']) + "}}\n" + mem['content'] + "\n"
+        return result
+    
+    memory_regex = re.compile(r"{{L(\d+)@(\d+)}}")
+
+    def import_readable(self, formatted_messages:str):
+        """
+        Parse messages exported by format_readable and use them to replace any
+        existing messages in this chat session.
+
+        Args:
+        formatted_messages (str): The formatted messages to be parsed.
+        """
+        # splitting with capturing groups returns the roles too
+        msg_parts = self.memory_regex.split(formatted_messages)
+        # drop first item, which is blank for some reason
+        msg_parts = msg_parts[1:]
+        
+        # strip out extra whitespace and format
+        # should probably pre-allocate this...
+        parsed_messages = []
+        for i in range(0, len(msg_parts), 3):
+            msg_dict = {
+                "level": int(msg_parts[i]),
+                "msg_idx": int(msg_parts[i + 1]),
+                "content": str.strip(msg_parts[i + 2])
+            }
+            parsed_messages.append(msg_dict)
+        self.all_memory = parsed_messages
+
     def to_json(self):
         """
         Write this object out as a JSON object.
