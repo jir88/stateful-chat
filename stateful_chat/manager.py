@@ -873,7 +873,8 @@ class HierarchicalSummaryMemory(ChatMemory):
     """
 
     def __init__(
-        self, summary_llm, chat_thread, 
+        self, summary_llm:LLM, chat_thread:ChatThread,
+        summary_prompt:str = None,
         prop_ctx:float=0.8,
         prop_summary:float=0.5,
         n_levels:int=3,
@@ -885,6 +886,9 @@ class HierarchicalSummaryMemory(ChatMemory):
         summary_llm (LLM): the LLM model to use when generating summaries. NOTE: make
             sure this model has the same allocated context window size as the main LLM!
         chat_thread (ChatThread): the chat thread associated with this memory object
+        summary_prompt (str): Optional custom summarization prompt. To include prior
+            context in the prompt, use placeholder {context}. If no custom prompt
+            provided, uses a default prompt instead.
         prop_ctx (float): the proportion of the total context window that summaries
             plus un-summarized messages may use up before triggering a higher-level
             summary.
@@ -903,6 +907,15 @@ class HierarchicalSummaryMemory(ChatMemory):
         self.prop_summary = prop_summary
         self.n_levels = n_levels
         self.n_tok_summarize = n_tok_summarize
+        
+        self.summarization_prompt = """You are summarizing a long series of messages into a concise but accurate summary. You will be given any relevant prior context and the user will provide the messages to be summarized. You must only summarize the content of the messages themselves, not the prior context. Make sure to include all important details.
+
+        Prior context:
+        {context}
+
+        Now the user will provide you with the messages to be summarized. Respond only with a single-paragraph summary, no additional commentary."""
+        if summary_prompt is not None:
+            self.summarization_prompt = summary_prompt
         # summaries are stored as a list of dicts with summary level, the actual
         # messages (or lower-level summaries) that were summarized, and the index
         # of the final summarized message in the full chat thread
@@ -1021,17 +1034,6 @@ class HierarchicalSummaryMemory(ChatMemory):
             }
             # new summary goes at the end
             self.all_memory.append(nts_dict)
-    
-    summarization_prompt = """You are summarizing a long series of messages into a concise but accurate summary.
-    You will be given any relevant prior context and the user will provide the messages to be summarized. You
-    must only summarize the content of the messages themselves, not the prior context. Make sure to include
-    all important details.
-
-    Prior context:
-    {context}
-
-    Now the user will provide you with the messages to be summarized. Respond only with a single-paragraph summary, no
-    additional commentary."""
 
     def _summarize_messages(self, messages:list, prior_summaries:list=[]):
         """
@@ -1195,6 +1197,7 @@ class HierarchicalSummaryMemory(ChatMemory):
         # define state to save
         settings_to_download = {"summary_llm": self.summary_llm.to_json(),
                                 "chat_thread": self.chat_thread.to_json(),
+                                "summarization_prompt": self.summarization_prompt,
                                 "prop_ctx": self.prop_ctx,
                                 "prop_summary": self.prop_summary,
                                 "n_levels": self.n_levels,
@@ -1224,7 +1227,11 @@ class HierarchicalSummaryMemory(ChatMemory):
         # load associated chat thread
         ct = ChatThread.from_json(uploaded_settings.get('chat_thread'))
         # create new memory object
-        new_obj = cls(summary_llm=llm, chat_thread=ct)
+        new_obj = cls(
+            summary_llm=llm,
+            chat_thread=ct,
+            summary_prompt=uploaded_settings.get('summarization_prompt')
+            )
         # load summary sizing parameters
         new_obj.prop_ctx = uploaded_settings["prop_ctx"]
         new_obj.prop_summary = uploaded_settings["prop_summary"]
