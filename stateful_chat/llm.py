@@ -2,6 +2,7 @@ import json
 import ollama
 import llama_cpp
 import openai
+import requests
 
 class LLM:
     """
@@ -451,6 +452,42 @@ class OpenAILLM(LLM):
         # now generate using regular completion endpoint
         result = self.generate(prompt=fmt_msgs, stream=stream)
         return result
+
+    import requests
+
+    def count_tokens(self, text:str):
+        """
+        Count the number of tokens in a given string using the /tokenize upstream endpoint, if available on this server.
+        This only really works with llama-swap.
+
+        Args:
+        text (str): The input string to tokenize.
+
+        Returns:
+        int: The number of tokens in the input string.
+        """
+        headers = {'Content-Type': 'text/plain'}
+
+        # Create the request payload
+        payload = {'content': text}
+        # get the upstream URL, llama-swap doesn't support directly
+        llm_url = self.client.base_url
+        tk_url = llm_url.scheme + "://" + llm_url.netloc.decode() + "/upstream/:" + self.model + "/tokenize"
+        # Send the POST request
+        response = requests.post(tk_url, headers=headers, json=payload)
+
+        # Check if the request was successful
+        if response.status_code == 200:
+            # Parse the JSON response
+            data = response.json()
+
+            # Extract the number of tokens from the response
+            tokens = data['tokens']
+
+            return len(tokens)
+        else:
+            print(f"Error: {response.status_code} - {response.text}")
+            return None
 
     def to_json(self):
         """
