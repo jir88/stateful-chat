@@ -2,7 +2,7 @@ import stateful_chat
 import stateful_chat.manager as scm
 import stateful_chat.llm as scl
 
-session_file = open("C:\\Users\\John Robinson\\Downloads\\logs\\pv-37-b.json", mode='r')
+session_file = open("C:\\Users\\John Robinson\\Downloads\\logs\\gw-28.json", mode='r')
 orig_chat_session = scm.StatefulChatManager.from_json(session_file)
 
 n_arch_msgs = len(orig_chat_session.chat_thread.archived_messages)
@@ -20,7 +20,9 @@ sampling_options = {
     "top_p": 1.0,
     "keep_alive": "15m"
 }
-llm = scl.OpenAILLM(model="gemma-3n-E4B-it-UD-Q4_K_XL-cpu", instruct_fmt=inst_fmt, sampling_options=sampling_options)
+llm = scl.OpenAILLM(model="ibm-granite_granite-4.0-tiny-preview-Q5_K_S-cpu", instruct_fmt=inst_fmt, sampling_options=sampling_options)
+n_tok = llm.count_tokens("The quick brown fox jumps over the lazy dog.")
+print("Tokens: " + str(n_tok))
 
 # construct a heirarchical chat and memory
 h_manager = scm.HierarchicalSummaryManager(
@@ -53,6 +55,6 @@ for msg in all_messages:
         n_memories = (len(h_memory.all_memory) + len(h_memory.archived_memory))
 
 print("Saving results...")
-with open("C:\\Users\\John Robinson\\Downloads\\logs\\pv-37-b-hmem.json", mode='w') as f:
+with open("C:\\Users\\John Robinson\\Downloads\\logs\\gw-28-hmem.json", mode='w') as f:
     f.write(h_manager.to_json())
 print("Done!")
