@@ -1147,6 +1147,8 @@ class HierarchicalSummaryMemory(ChatMemory):
 
         Returns: the approximate number of tokens
         """
+        if isinstance(self.summary_llm, OpenAILLM):
+            return self.summary_llm.count_tokens(text)
         return max(1, len(text)/3.5)
 
     def format_readable(self):
