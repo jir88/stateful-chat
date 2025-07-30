@@ -196,6 +196,35 @@ with tab_mem:
         st.session_state.chat_session.chat_memory.summarization_prompt,
         height = 200
         )
+    st.session_state.chat_session.chat_memory.prop_ctx = st.number_input(
+        "Maximum context proportion threshold:",
+        help="Proportion of the total context window that summaries plus un-summarized messages may use up before triggering a higher-level summary.",
+        min_value=0.0, 
+        max_value=1.0,
+        value=st.session_state.chat_session.chat_memory.prop_ctx, 
+        step=0.05
+        )
+    st.session_state.chat_session.chat_memory.prop_summary = st.number_input(
+        "Maximum summary proportion:",
+        help="The proportion of a message/summary level that can be occupied by messages/summaries of higher level. Each summary level is allocated prop_summary of the context alloted to the next higher level (total context window for original thread messages).",
+        min_value=0.0, 
+        max_value=1.0,
+        value=st.session_state.chat_session.chat_memory.prop_summary, 
+        step=0.05
+        )
+    st.session_state.chat_session.chat_memory.n_levels = st.number_input(
+        "Maximum number of summary levels:",
+        min_value=1,
+        value=st.session_state.chat_session.chat_memory.n_levels, 
+        step=1
+        )
+    st.session_state.chat_session.chat_memory.n_tok_summarize = st.number_input(
+        "Number of tokens to summarize:",
+        help="The target number of tokens to summarize in one pass. If this corresponds to less than one message, that whole message will be summarized.",
+        min_value=1,
+        value=st.session_state.chat_session.chat_memory.n_tok_summarize, 
+        step=256
+        )
     
     # mode-switching check-box
     if st.checkbox(label = "Manual memory editing"):
