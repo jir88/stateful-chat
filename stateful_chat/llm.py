@@ -472,7 +472,7 @@ class OpenAILLM(LLM):
         payload = {'content': text}
         # get the upstream URL, llama-swap doesn't support directly
         llm_url = self.client.base_url
-        tk_url = llm_url.scheme + "://" + llm_url.netloc.decode() + "/upstream/:" + self.model + "/tokenize"
+        tk_url = llm_url.scheme + "://" + llm_url.netloc.decode() + "/upstream/" + self.model + "/tokenize"
         # Send the POST request
         response = requests.post(tk_url, headers=headers, json=payload)
 
