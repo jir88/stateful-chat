@@ -29,6 +29,9 @@ class StatefulChatManager:
         Args:
         message (dict): Dict containing at least 'role' and 'content' keys
         """
+        # if missing, set ID to be the message index
+        if not "id" in message:
+            message['id'] = len(self.chat_thread.messages) + len(self.chat_thread.archived_messages)
         # add to the active chat thread
         self.chat_thread.messages.append(message)
         # Needs updating: embed regenerated AI response
