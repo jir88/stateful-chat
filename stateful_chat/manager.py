@@ -500,7 +500,6 @@ class LLMSummaryMemory(ChatMemory):
         o_gen = self.llm.generate_instruct(msgs, respond=True, response_role=self.ai_role, stream=False)
         # grab the updated list
         self.entity_list = o_gen['response']
-        print(msg_list)
 
     def add_documents(self, docs):
         """
@@ -684,6 +683,9 @@ class HierarchicalSummaryManager(StatefulChatManager):
         full_sys_prompt = ""
         if self.chat_thread.system_prompt is not None:
             full_sys_prompt += self.chat_thread.system_prompt.strip()
+        # add entity list, if any
+        if self.chat_memory.entity_list is not None and len(self.chat_memory.entity_list) > 0:
+            full_sys_prompt += "\n\nEntities appearing in previous messages:\n" + self.chat_memory.entity_list
         # add top-level summary from memory
         if len(self.chat_memory.all_memory) > 0:
             mems = [m['content'] for m in self.chat_memory.all_memory]
@@ -790,6 +792,17 @@ class HierarchicalSummaryMemory(ChatMemory):
         self.all_memory = []
         # summaries which have been collapsed into the top-level summary go here
         self.archived_memory = []
+        # free-form text description of important entities (people/places/things) in the memories
+        self.entity_list = None
+        # and the default prompt to generate it
+        self.prompt_entity_list = """You are creating a list of all entities mentioned thus far and a brief description of each. You will be given any relevant prior context and the user will provide the messages from which you should extract or update entities. For people, include a brief description of their personalities. Write more detailed descriptions for more important entities.
+        Prior context:
+        {context}
+
+        Existing list of entities to be updated:
+        {entities}
+
+        Now the user will provide you with the messages from which you should extract entity information. Respond only with a list of all entities and a brief description of each entity, no additional commentary."""
 
     def update_all_memory(self):
         """
@@ -798,6 +811,8 @@ class HierarchicalSummaryMemory(ChatMemory):
         messages will be summarized and archived. Note that this process only 
         summarizes the oldest n_tok_summarize tokens of each level (rounded up to
         the next message), so one or more levels may still be 'over-budget' afterwards.
+
+        This function also updates the entity list or creates a new one if none is present.
         """
         # first memory will be in the highest current level
         if len(self.all_memory) > 0:
@@ -839,6 +854,11 @@ class HierarchicalSummaryMemory(ChatMemory):
                 # summarize the messages
                 summarized_messages = [self.all_memory[i] for i in idx_to_summarize]
                 new_top_summary = self._summarize_messages(
+                    messages=summarized_messages,
+                    prior_summaries=self.all_memory[:start_summ_index]
+                )
+                # update entity list
+                self.entity_list = self._update_entities(
                     messages=summarized_messages,
                     prior_summaries=self.all_memory[:start_summ_index]
                 )
@@ -888,6 +908,11 @@ class HierarchicalSummaryMemory(ChatMemory):
                 messages=summarized_messages,
                 prior_summaries=self.all_memory
             )
+            # update entity list
+            self.entity_list = self._update_entities(
+                messages=summarized_messages,
+                prior_summaries=self.all_memory[:start_summ_index]
+            )
             # archive these messages from the chat thread
             self.chat_thread.archive_messages(
                 start_idx=0,
@@ -928,6 +953,47 @@ class HierarchicalSummaryMemory(ChatMemory):
             'content': "Please summarize the following messages:\n\n" + "\n\n".join([m['content'] for m in messages])
         }
         # generate the summary
+        llm_response = self.summary_llm.generate_instruct(
+            messages=[sys_prompt, user_prompt],
+            respond=True,
+            response_role="assistant",
+            stream=False
+        )
+        # pull the first/only result off the generator and strip whitespace
+        return next(llm_response)['response'].strip()
+
+    def _update_entities(self, messages:list, prior_summaries:list=[]):
+        """
+        Update a free-form list of previously-mentioned entities, optionally including a list of 
+        older summaries as context.
+
+        Args:
+        messages (list): a list of messages to extract/update entities from
+        prior_summaries (list): a list of older summaries to be used as context when updating
+
+        Returns: the updated entity list
+        """
+        # if no prior context, just put 'None' in as a placeholder
+        if len(prior_summaries) == 0:
+            prior_summaries = [{ 'content': "No prior context." }]
+        # if no existing entity list, put in a placeholder
+        old_ent_list = self.entity_list
+        if old_ent_list is None or len(old_ent_list) == 0:
+            old_ent_list = "No prior entity list available."
+        
+        # construct system prompt
+        sys_prompt = {
+            'role': 'system',
+            'content': self.prompt_entity_list.format(
+                context="\n\n".join([ps['content'] for ps in prior_summaries]),
+                entities=old_ent_list
+            )
+        }
+        user_prompt = {
+            'role': 'user',
+            'content': "Please update the entity list using information from the following messages:\n\n" + "\n\n".join([m['content'] for m in messages])
+        }
+        # generate the entity list
         llm_response = self.summary_llm.generate_instruct(
             messages=[sys_prompt, user_prompt],
             respond=True,
@@ -1073,7 +1139,9 @@ class HierarchicalSummaryMemory(ChatMemory):
                                 "n_levels": self.n_levels,
                                 "n_tok_summarize": self.n_tok_summarize,
                                 "all_memory": self.all_memory,
-                                "archived_memory": self.archived_memory
+                                "archived_memory": self.archived_memory,
+                                "entity_list": self.entity_list,
+                                "prompt_entity_list": self.prompt_entity_list
                                 }
         # dump it to a JSON file
         return json.dumps(settings_to_download)
@@ -1111,6 +1179,9 @@ class HierarchicalSummaryMemory(ChatMemory):
         new_obj.all_memory = uploaded_settings["all_memory"]
         # load archived summaries
         new_obj.archived_memory = uploaded_settings["archived_memory"]
-        
+        # get entity list, if any
+        new_obj.entity_list = uploaded_settings.get('entity_list', None)
+        # get custom prompt, if any
+        new_obj.prompt_entity_list = uploaded_settings.get('prompt_entity_list', new_obj.prompt_entity_list)
         # return object
         return new_obj
