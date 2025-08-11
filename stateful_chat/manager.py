@@ -443,7 +443,6 @@ class LLMSummaryMemory(ChatMemory):
             'role': "system",
             'content': context
         }])
-        print(context)
         
         # ======  Generate summary of current messages ======
         

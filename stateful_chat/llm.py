@@ -385,11 +385,8 @@ class OpenAILLM(LLM):
             # specifying the canonical OpenAI ones
             extra_body=self.sampling_options
         )
-        print("Streaming?")
+        
         if not stream:
-            # only one response but we have to stream it for some reason
-            # chunk = next(response)
-            print(response.choices[0])
             ol_dict = {
                 'response': response.choices[0].text
             }
@@ -402,7 +399,6 @@ class OpenAILLM(LLM):
             yield ol_dict
         else:
             for chunk in response:
-                print(chunk)
                 ol_dict = {
                     'response': chunk.choices[0].text
                 }
