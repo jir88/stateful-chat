@@ -335,7 +335,7 @@ class OpenAILLM(LLM):
         self.client = openai.OpenAI(
             api_key="placeholder",
             base_url="http://127.0.0.1:8080/v1",
-            timeout=300,
+            timeout=1200,
             max_retries=10
         )
         # if no options specified, we provide some reasonable defaults
