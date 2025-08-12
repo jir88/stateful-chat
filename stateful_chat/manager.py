@@ -795,14 +795,14 @@ class HierarchicalSummaryMemory(ChatMemory):
         # free-form text description of important entities (people/places/things) in the memories
         self.entity_list = None
         # and the default prompt to generate it
-        self.prompt_entity_list = """You are creating a list of all entities mentioned thus far and a brief description of each. You will be given any relevant prior context and the user will provide the messages from which you should extract or update entities. For people, include a brief description of their personalities. Write more detailed descriptions for more important entities.
+        self.prompt_entity_list = """You are creating a list of all important entities mentioned thus far and a brief description of each. You will be given any relevant prior context and the user will provide the messages from which you should extract or update entities. For people, include a brief description of their personalities and appearance. Write more detailed descriptions for more important entities.
         Prior context:
         {context}
 
         Existing list of entities to be updated:
         {entities}
 
-        Now the user will provide you with the messages from which you should extract entity information. Respond only with a list of all entities and a brief description of each entity, no additional commentary."""
+        Now the user will provide you with the messages from which you should extract entity information. Respond only with a list of significant entities and a brief description of each entity, no additional commentary."""
 
     def update_all_memory(self):
         """
@@ -857,11 +857,8 @@ class HierarchicalSummaryMemory(ChatMemory):
                     messages=summarized_messages,
                     prior_summaries=self.all_memory[:start_summ_index]
                 )
-                # update entity list
-                self.entity_list = self._update_entities(
-                    messages=summarized_messages,
-                    prior_summaries=self.all_memory[:start_summ_index]
-                )
+                # don't update entity list here -- we've already ingested that data
+                # when summarizing the raw messages
                 # put old summary messages in archive
                 self.archived_memory.extend(summarized_messages)
                 # delete from active summaries
