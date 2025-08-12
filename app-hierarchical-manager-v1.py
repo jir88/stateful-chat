@@ -263,11 +263,11 @@ with tab_mem:
     #         mem_id = len(st.session_state.chat_session.chat_memory.message_summaries) - 1
     #         st.session_state.chat_session.chat_memory.update_memory(mem_id=mem_id, mem_content=edited_memory)
     
-    # st.session_state.chat_session.chat_memory.prompt_entity_list = st.text_area("Entity list prompt:", st.session_state.chat_session.chat_memory.prompt_entity_list, height = 100)
-    # if st.session_state.chat_session.chat_memory.entity_list is None:
-    #     st.write("Entity list: None")
-    # else:
-    #     st.session_state.chat_session.chat_memory.entity_list = st.text_area("Entity list:", st.session_state.chat_session.chat_memory.entity_list, height = 150)
+    st.session_state.chat_session.chat_memory.prompt_entity_list = st.text_area("Entity list prompt:", st.session_state.chat_session.chat_memory.prompt_entity_list, height = 150)
+    if st.session_state.chat_session.chat_memory.entity_list is None:
+        st.write("Entity list: None")
+    else:
+        st.session_state.chat_session.chat_memory.entity_list = st.text_area("Entity list:", st.session_state.chat_session.chat_memory.entity_list, height = 150)
 
 # ====================== Database Tab ========================
 
