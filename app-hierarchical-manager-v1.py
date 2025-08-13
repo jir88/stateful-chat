@@ -268,6 +268,26 @@ with tab_mem:
         st.write("Entity list: None")
     else:
         st.session_state.chat_session.chat_memory.entity_list = st.text_area("Entity list:", st.session_state.chat_session.chat_memory.entity_list, height = 150)
+    
+    # calculate sizes of all summary levels and print them
+    if st.button(label="Context size"):
+        total_size = 0
+        # calculate size of raw messages
+        level_size = 0
+        for msg in st.session_state.chat_session.chat_thread.messages:
+            level_size += st.session_state.chat_session.llm.count_tokens(msg['content'])
+        total_size += level_size
+        # calculate percent of alloted space
+        level_allowance = st.session_state.chat_session.llm.sampling_options['num_ctx']*st.session_state.chat_session.chat_memory.prop_ctx
+        level_pct = int(level_size/level_allowance*100)
+        st.write(f"Message size: {level_size} ({level_pct}%)")
+        for level in range(1, st.session_state.chat_session.chat_memory.n_levels + 1):
+            level_size = st.session_state.chat_session.chat_memory.summary_level_size(level=level)
+            level_allowance = st.session_state.chat_session.llm.sampling_options['num_ctx']*st.session_state.chat_session.chat_memory.prop_ctx*st.session_state.chat_session.chat_memory.prop_summary**level
+            level_pct = int(level_size/level_allowance*100)
+            st.write(f"Level {level} size: {level_size} ({level_pct}%)")
+            total_size += level_size
+        st.write(f"Total context size: {total_size}")
 
 # ====================== Database Tab ========================
 
