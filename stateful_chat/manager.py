@@ -834,7 +834,7 @@ class HierarchicalSummaryMemory(ChatMemory):
             start_summ_index = self._get_index_of_first_summary_in_level(level=current_level)
             # is this level too big?
             level_allowance = self.summary_llm.sampling_options['num_ctx']*self.prop_ctx*self.prop_summary**current_level
-            current_level_tokens = self._summary_level_size(level=current_level)
+            current_level_tokens = self.summary_level_size(level=current_level)
             if (higher_level_tokens + current_level_tokens) >= level_allowance:
                 # if the next-to-highest summary level is too big, we include the top level summary
                 if current_level == (self.n_levels - 1) and self.all_memory[0]['level'] == self.n_levels:
@@ -879,7 +879,7 @@ class HierarchicalSummaryMemory(ChatMemory):
                     nts_dict
                 )
             # add current level's remaining tokens to the cumulative total
-            higher_level_tokens += self._summary_level_size(level=current_level)
+            higher_level_tokens += self.summary_level_size(level=current_level)
             # move to next level down
             current_level -= 1
 
@@ -1052,7 +1052,7 @@ class HierarchicalSummaryMemory(ChatMemory):
                 return i
         return len(msgs)
     
-    def _summary_level_size(self, level:int):
+    def summary_level_size(self, level:int):
         """
         Estimate the number of tokens in all summaries of a given level.
 
