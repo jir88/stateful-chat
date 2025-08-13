@@ -1,5 +1,6 @@
 {
 "name": "Llama 3 Chat", 
+"begin_of_text": "",
 "message_template": "<|start_header_id|>{role}<|end_header_id|>\n\n{content}",
 "end_of_turn": "<|eot_id|>",
 "continue_template": "<|start_header_id|>{role}<|end_header_id|>\n\n",

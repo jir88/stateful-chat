@@ -1,0 +1,10 @@
+{
+"name": "Deepseek Chat", 
+"begin_of_text": "",
+"message_template": "< | {role} | >{content}",
+"end_of_turn": "< | end_of_sentence | >",
+"continue_template": "< | {role} | >",
+"user_role": "User",
+"ai_role": "Assistant",
+"system_role": "System"
+}
