@@ -93,7 +93,7 @@ def get_continuation():
     return ogen_wrapper(o_gen)
 
 # Construct tabs
-tab_main, tab_mem, tab_db, tab_settings = st.tabs(["Main", "Memory", "Database", "Settings"])
+tab_main, tab_mem, tab_arch, tab_db, tab_settings = st.tabs(["Main", "Memory", "Archive", "Database", "Settings"])
 # =============== Main Tab ========================
 
 with tab_main:
@@ -288,6 +288,19 @@ with tab_mem:
             st.write(f"Level {level} size: {level_size} ({level_pct}%)")
             total_size += level_size
         st.write(f"Total context size: {total_size}")
+
+# ====================== Archive Tab ========================
+
+# NOTE: this version assumes that manager is using HierarchicalSummaryMemory!!!
+with tab_arch:
+    # render non-editable archived conversation history in container
+    with st.container(height=800):
+        # display conversation
+        if len(st.session_state.chat_session.chat_thread.messages) > 0:
+            for msg in st.session_state.chat_session.chat_thread.archived_messages:
+                with st.chat_message(msg['role']):
+                    st.write(msg['content'])
+    # end chat container
 
 # ====================== Database Tab ========================
 
