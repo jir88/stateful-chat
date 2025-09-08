@@ -1,0 +1,10 @@
+{
+"name": "Mistral Chat", 
+"begin_of_text": "",
+"message_template": "[{role}]{content}",
+"end_of_turn": "</s>",
+"continue_template": "[{role}]",
+"user_role": "INST",
+"ai_role": "/INST",
+"system_role": "SYSTEM_PROMPT"
+}
