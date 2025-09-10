@@ -2,7 +2,7 @@ import stateful_chat
 import stateful_chat.manager as scm
 import stateful_chat.llm as scl
 
-session_file = open("C:\\Users\\John Robinson\\Downloads\\logs\\prequel-250730.txt", mode='r', encoding="utf-8")
+session_file = open("", mode='r', encoding="utf-8")
 
 all_lines = session_file.readlines()
 
@@ -110,6 +110,6 @@ for msg in all_messages:
         n_memories = (len(h_memory.all_memory) + len(h_memory.archived_memory))
 
 print("Saving results...")
-with open("C:\\Users\\John Robinson\\Downloads\\logs\\pre-1-hmem.json", mode='w') as f:
+with open("", mode='w') as f:
     f.write(h_manager.to_json())
 print("Done!")

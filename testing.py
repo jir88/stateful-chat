@@ -2,7 +2,7 @@ import stateful_chat
 import stateful_chat.manager as scm
 import stateful_chat.llm as scl
 
-session_file = open("C:\\Users\\John Robinson\\Downloads\\logs\\mb-4.json", mode='r')
+session_file = open("", mode='r')
 orig_chat_session = scm.StatefulChatManager.from_json(session_file)
 # orig_chat_session = scm.HierarchicalSummaryManager.from_json(session_file)
 
@@ -56,6 +56,6 @@ for msg in all_messages:
         n_memories = (len(h_memory.all_memory) + len(h_memory.archived_memory))
 
 print("Saving results...")
-with open("C:\\Users\\John Robinson\\Downloads\\logs\\mb-4-hmem.json", mode='w') as f:
+with open("", mode='w') as f:
     f.write(h_manager.to_json())
 print("Done!")
