@@ -245,23 +245,6 @@ with tab_mem:
                         st.write("[Level " + str(msg['level']) + "] " + msg['content'])
         # end chat container
     # end auto/manual selection
-
-    # st.session_state.chat_session.chat_memory.prompt_full_summary = st.text_area("Full summary prompt:", st.session_state.chat_session.chat_memory.prompt_full_summary, height = 100)
-    # if st.session_state.chat_session.chat_memory.full_summary is None:
-    #     st.write("Full summary: None")
-    # else:
-    #     st.session_state.chat_session.chat_memory.full_summary = st.text_area("Full summary:", st.session_state.chat_session.chat_memory.full_summary, height = 150)
-    
-    # st.session_state.chat_session.chat_memory.prompt_msg_summary = st.text_area("Message summary prompt:", st.session_state.chat_session.chat_memory.prompt_msg_summary, height = 100)
-    # if len(st.session_state.chat_session.chat_memory.message_summaries) == 0:
-    #     st.write("Message chunk summary: None")
-    # else:
-    #     original_memory = st.session_state.chat_session.chat_memory.message_summaries[-1]['content']
-    #     edited_memory = st.text_area("Message chunk summary:", original_memory, height = 150)
-    #     # update memory if it has been changed
-    #     if original_memory != edited_memory:
-    #         mem_id = len(st.session_state.chat_session.chat_memory.message_summaries) - 1
-    #         st.session_state.chat_session.chat_memory.update_memory(mem_id=mem_id, mem_content=edited_memory)
     
     st.session_state.chat_session.chat_memory.prompt_entity_list = st.text_area("Entity list prompt:", st.session_state.chat_session.chat_memory.prompt_entity_list, height = 150)
     if st.session_state.chat_session.chat_memory.entity_list is None:
