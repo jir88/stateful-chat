@@ -1,6 +1,6 @@
 import json
-import ollama
-import llama_cpp
+# import ollama
+# import llama_cpp
 import openai
 import requests
 
@@ -38,6 +38,18 @@ class LLM:
         A generator function if stream is true, otherwise a string containing the response.
         """
         raise NotImplementedError("Method must be implemented in a subclass!")
+    
+    def count_tokens(self, text:str):
+        """
+        Count (or estimate) the number of tokens in a given string.
+
+        Args:
+        text (str): The input string to tokenize.
+
+        Returns:
+        int: The (approximate) number of tokens in the input string.
+        """
+        raise NotImplementedError("Method must be implemented in a subclass!")
 
     @classmethod
     def from_json(cls, json_data):
@@ -66,263 +78,263 @@ class LLM:
         else:
             raise NotImplementedError("Unrecognized LLM type: " + class_type)
 
-class OllamaLLM(LLM):
-    """
-    Uses Ollama backend to interact with LLMs.
-    """
+# class OllamaLLM(LLM):
+#     """
+#     Uses Ollama backend to interact with LLMs.
+#     """
 
-    def __init__(self, model, sampling_options=None, instruct_fmt=None):
-        """
-        Create a new LLM provided by Ollama.
+#     def __init__(self, model, sampling_options=None, instruct_fmt=None):
+#         """
+#         Create a new LLM provided by Ollama.
 
-        Args:
-        model (str): Name of the LLM that Ollama should use.
-        sampling_options (dict): Dictionary of Ollama sampling parameters to use.
-        instruct_fmt (InstructFormat): The instruct format this LLM expects.
-        """
-        self.model = model
-        # if no options specified, we provide some reasonable defaults
-        if sampling_options is None:
-            self.sampling_options = {
-                "num_predict": 512,
-                "num_ctx": 4096,
-                "temperature": 1.0,
-                "min_p": 0.1,
-                #"stop": self.stop_words,
-                "keep_alive": "15m"
-            }
-        else: # use the user-supplied options
-            self.sampling_options = sampling_options
-        # use generic instruct format if none specified
-        if instruct_fmt is None:
-            self.instruct_format = InstructFormat(name="Basic Chat",
-                                                  begin_of_text = "",
-                                                  message_template="{role}:\n{content}",
-                                                  end_of_turn="\n\n",
-                                                  continue_template="{role}:\n")
-        else:
-            self.instruct_format = instruct_fmt
+#         Args:
+#         model (str): Name of the LLM that Ollama should use.
+#         sampling_options (dict): Dictionary of Ollama sampling parameters to use.
+#         instruct_fmt (InstructFormat): The instruct format this LLM expects.
+#         """
+#         self.model = model
+#         # if no options specified, we provide some reasonable defaults
+#         if sampling_options is None:
+#             self.sampling_options = {
+#                 "num_predict": 512,
+#                 "num_ctx": 4096,
+#                 "temperature": 1.0,
+#                 "min_p": 0.1,
+#                 #"stop": self.stop_words,
+#                 "keep_alive": "15m"
+#             }
+#         else: # use the user-supplied options
+#             self.sampling_options = sampling_options
+#         # use generic instruct format if none specified
+#         if instruct_fmt is None:
+#             self.instruct_format = InstructFormat(name="Basic Chat",
+#                                                   begin_of_text = "",
+#                                                   message_template="{role}:\n{content}",
+#                                                   end_of_turn="\n\n",
+#                                                   continue_template="{role}:\n")
+#         else:
+#             self.instruct_format = instruct_fmt
 
-    def generate(self, prompt, stream=True):
-        """
-        Generate a response to a given text prompt. If stream is true, function returns a generator
-        that yields the response chunks as they become available. Otherwise, the full response is
-        returned as a string.
+#     def generate(self, prompt, stream=True):
+#         """
+#         Generate a response to a given text prompt. If stream is true, function returns a generator
+#         that yields the response chunks as they become available. Otherwise, the full response is
+#         returned as a string.
 
-        Args:
-        prompt (str): The prompt that the LLM should respond to
-        stream (bool): Whether the response should be streamed as it is generated
+#         Args:
+#         prompt (str): The prompt that the LLM should respond to
+#         stream (bool): Whether the response should be streamed as it is generated
 
-        Returns:
-        A generator function if stream is true, otherwise a string containing the response.
-        """
-        o_options = self.sampling_options.copy()
-        #o_options["stop"] = self.stop_words
-        o_gen = ollama.generate(model=self.model, 
-                                prompt=prompt,
-                                stream=stream, raw=True, options=o_options)
-        # return the generator or result, depending on stream parameter
-        return o_gen
+#         Returns:
+#         A generator function if stream is true, otherwise a string containing the response.
+#         """
+#         o_options = self.sampling_options.copy()
+#         #o_options["stop"] = self.stop_words
+#         o_gen = ollama.generate(model=self.model, 
+#                                 prompt=prompt,
+#                                 stream=stream, raw=True, options=o_options)
+#         # return the generator or result, depending on stream parameter
+#         return o_gen
 
-    def generate_instruct(self, messages, respond=True, response_role=None, stream=True):
-        """
-        Generate a response to a given text prompt. If stream is true, function returns a generator
-        that yields the response chunks as they become available. Otherwise, the full response is
-        returned as a string.
+#     def generate_instruct(self, messages, respond=True, response_role=None, stream=True):
+#         """
+#         Generate a response to a given text prompt. If stream is true, function returns a generator
+#         that yields the response chunks as they become available. Otherwise, the full response is
+#         returned as a string.
 
-        Args:
-        messages (list[dict]): The chat messages that the LLM should respond to
-        respond (bool): If true, LLM will respond to last message. If false, LLM will
-            continue generating from the end of the last message.
-        response_role (str): The role LLM should use when responding.
-        stream (bool): Whether the response should be streamed as it is generated
+#         Args:
+#         messages (list[dict]): The chat messages that the LLM should respond to
+#         respond (bool): If true, LLM will respond to last message. If false, LLM will
+#             continue generating from the end of the last message.
+#         response_role (str): The role LLM should use when responding.
+#         stream (bool): Whether the response should be streamed as it is generated
 
-        Returns:
-        A generator function if stream is true, otherwise a string containing the response.
-        """
-        if respond and response_role is None:
-            raise ValueError("Response role must be set in order for LLM to respond!")
-        # format messages
-        if respond:
-            fmt_msgs = self.instruct_format.format_messages(messages, bot=True, eot=True,
-                                                            append_continuation=True,
-                                                            continue_role=response_role)
-        else:
-            fmt_msgs = self.instruct_format.format_messages(messages, bot=True, eot=False,
-                                                            append_continuation=False)
-        return self.generate(prompt=fmt_msgs, stream=stream)
+#         Returns:
+#         A generator function if stream is true, otherwise a string containing the response.
+#         """
+#         if respond and response_role is None:
+#             raise ValueError("Response role must be set in order for LLM to respond!")
+#         # format messages
+#         if respond:
+#             fmt_msgs = self.instruct_format.format_messages(messages, bot=True, eot=True,
+#                                                             append_continuation=True,
+#                                                             continue_role=response_role)
+#         else:
+#             fmt_msgs = self.instruct_format.format_messages(messages, bot=True, eot=False,
+#                                                             append_continuation=False)
+#         return self.generate(prompt=fmt_msgs, stream=stream)
 
-    def to_json(self):
-        """
-        Write this object out as a JSON object.
+#     def to_json(self):
+#         """
+#         Write this object out as a JSON object.
 
-        Returns: a string containing the JSON object
-        """
-        # define state to save
-        settings_to_download = {"model": self.model,
-                                "sampling_options": self.sampling_options,
-                                "instruct_format": self.instruct_format.to_json()
-                                }
-        # dump it to a JSON file
-        return json.dumps(settings_to_download)
+#         Returns: a string containing the JSON object
+#         """
+#         # define state to save
+#         settings_to_download = {"model": self.model,
+#                                 "sampling_options": self.sampling_options,
+#                                 "instruct_format": self.instruct_format.to_json()
+#                                 }
+#         # dump it to a JSON file
+#         return json.dumps(settings_to_download)
 
-    @classmethod
-    def from_json(cls, json_data):
-        """
-        Load saved session state from a JSON object.
-        Args:
-        json_data (str): JSON object or file containing session data
+#     @classmethod
+#     def from_json(cls, json_data):
+#         """
+#         Load saved session state from a JSON object.
+#         Args:
+#         json_data (str): JSON object or file containing session data
 
-        Returns: a new ChatSession object initialized from the JSON data
-        """
-        # load saved state
-        if type(json_data) == str:
-            uploaded_settings = json.loads(json_data)
-        else:
-            uploaded_settings = json.load(json_data)
-        # get model name
-        model_name = uploaded_settings.get('model')
-        # pull sampling options
-        samp_opts = uploaded_settings.get('sampling_options')
-        # read instruct format
-        inst_fmt = InstructFormat.from_json(uploaded_settings.get('instruct_format'))
-        # create new LLM object
-        new_obj = cls(model=model_name, sampling_options=samp_opts, instruct_fmt=inst_fmt)
-        # return object
-        return new_obj
+#         Returns: a new ChatSession object initialized from the JSON data
+#         """
+#         # load saved state
+#         if type(json_data) == str:
+#             uploaded_settings = json.loads(json_data)
+#         else:
+#             uploaded_settings = json.load(json_data)
+#         # get model name
+#         model_name = uploaded_settings.get('model')
+#         # pull sampling options
+#         samp_opts = uploaded_settings.get('sampling_options')
+#         # read instruct format
+#         inst_fmt = InstructFormat.from_json(uploaded_settings.get('instruct_format'))
+#         # create new LLM object
+#         new_obj = cls(model=model_name, sampling_options=samp_opts, instruct_fmt=inst_fmt)
+#         # return object
+#         return new_obj
 
 
-class LlamaCppPythonLLM(LLM):
-    """
-    Uses the python interface to llama.cpp to interact with LLMs.
-    """
+# class LlamaCppPythonLLM(LLM):
+#     """
+#     Uses the python interface to llama.cpp to interact with LLMs.
+#     """
 
-    def __init__(self, model, sampling_options=None, instruct_fmt=None):
-        """
-        Create a new LLM provided by llama.cpp.
+#     def __init__(self, model, sampling_options=None, instruct_fmt=None):
+#         """
+#         Create a new LLM provided by llama.cpp.
 
-        Args:
-        model (str): Name of the LLM that Ollama should use.
-        sampling_options (dict): Dictionary of Ollama sampling parameters to use.
-        instruct_fmt (InstructFormat): The instruct format this LLM expects.
-        """
-        self.model = model
-        # if no options specified, we provide some reasonable defaults
-        if sampling_options is None:
-            self.sampling_options = {
-                "num_predict": 512,
-                "num_ctx": 4096,
-                "temperature": 1.0,
-                "min_p": 0.1,
-                #"stop": self.stop_words,
-                "keep_alive": "15m"
-            }
-        else: # use the user-supplied options
-            self.sampling_options = sampling_options
-        # use generic instruct format if none specified
-        if instruct_fmt is None:
-            self.instruct_format = InstructFormat(name="Basic Chat",
-                                                  begin_of_text = "",
-                                                  message_template="{role}:\n{content}",
-                                                  end_of_turn="\n\n",
-                                                  continue_template="{role}:\n")
-        else:
-            self.instruct_format = instruct_fmt
+#         Args:
+#         model (str): Name of the LLM that Ollama should use.
+#         sampling_options (dict): Dictionary of Ollama sampling parameters to use.
+#         instruct_fmt (InstructFormat): The instruct format this LLM expects.
+#         """
+#         self.model = model
+#         # if no options specified, we provide some reasonable defaults
+#         if sampling_options is None:
+#             self.sampling_options = {
+#                 "num_predict": 512,
+#                 "num_ctx": 4096,
+#                 "temperature": 1.0,
+#                 "min_p": 0.1,
+#                 #"stop": self.stop_words,
+#                 "keep_alive": "15m"
+#             }
+#         else: # use the user-supplied options
+#             self.sampling_options = sampling_options
+#         # use generic instruct format if none specified
+#         if instruct_fmt is None:
+#             self.instruct_format = InstructFormat(name="Basic Chat",
+#                                                   begin_of_text = "",
+#                                                   message_template="{role}:\n{content}",
+#                                                   end_of_turn="\n\n",
+#                                                   continue_template="{role}:\n")
+#         else:
+#             self.instruct_format = instruct_fmt
 
-    def generate(self, prompt, stream=True):
-        """
-        Generate a response to a given text prompt. If stream is true, function returns a generator
-        that yields the response chunks as they become available. Otherwise, the full response is
-        returned as a string.
+#     def generate(self, prompt, stream=True):
+#         """
+#         Generate a response to a given text prompt. If stream is true, function returns a generator
+#         that yields the response chunks as they become available. Otherwise, the full response is
+#         returned as a string.
 
-        Args:
-        prompt (str): The prompt that the LLM should respond to
-        stream (bool): Whether the response should be streamed as it is generated
+#         Args:
+#         prompt (str): The prompt that the LLM should respond to
+#         stream (bool): Whether the response should be streamed as it is generated
 
-        Returns:
-        A generator function if stream is true, otherwise a string containing the response.
-        """
-        o_options = self.sampling_options.copy()
-        #o_options["stop"] = self.stop_words
-        o_gen = ollama.generate(model=self.model, 
-                                prompt=prompt,
-                                stream=stream, raw=True, options=o_options)
-        # return the generator or result, depending on stream parameter
-        return o_gen
+#         Returns:
+#         A generator function if stream is true, otherwise a string containing the response.
+#         """
+#         o_options = self.sampling_options.copy()
+#         #o_options["stop"] = self.stop_words
+#         o_gen = ollama.generate(model=self.model, 
+#                                 prompt=prompt,
+#                                 stream=stream, raw=True, options=o_options)
+#         # return the generator or result, depending on stream parameter
+#         return o_gen
 
-    def generate_instruct(self, messages, respond=True, response_role=None, stream=True):
-        """
-        Generate a response to a given text prompt. If stream is true, function returns a generator
-        that yields the response chunks as they become available. Otherwise, the full response is
-        returned as a string.
+#     def generate_instruct(self, messages, respond=True, response_role=None, stream=True):
+#         """
+#         Generate a response to a given text prompt. If stream is true, function returns a generator
+#         that yields the response chunks as they become available. Otherwise, the full response is
+#         returned as a string.
 
-        Args:
-        messages (list[dict]): The chat messages that the LLM should respond to
-        respond (bool): If true, LLM will respond to last message. If false, LLM will
-            continue generating from the end of the last message.
-        response_role (str): The role LLM should use when responding.
-        stream (bool): Whether the response should be streamed as it is generated
+#         Args:
+#         messages (list[dict]): The chat messages that the LLM should respond to
+#         respond (bool): If true, LLM will respond to last message. If false, LLM will
+#             continue generating from the end of the last message.
+#         response_role (str): The role LLM should use when responding.
+#         stream (bool): Whether the response should be streamed as it is generated
 
-        Returns:
-        A generator function if stream is true, otherwise a string containing the response.
-        """
-        if respond and response_role is None:
-            raise ValueError("Response role must be set in order for LLM to respond!")
-        # format messages
-        if respond:
-            fmt_msgs = self.instruct_format.format_messages(messages, bot=True, eot=True,
-                                                            append_continuation=True,
-                                                            continue_role=response_role)
-        else:
-            fmt_msgs = self.instruct_format.format_messages(messages, bot=True, eot=False,
-                                                            append_continuation=False)
-        return self.generate(prompt=fmt_msgs, stream=stream)
+#         Returns:
+#         A generator function if stream is true, otherwise a string containing the response.
+#         """
+#         if respond and response_role is None:
+#             raise ValueError("Response role must be set in order for LLM to respond!")
+#         # format messages
+#         if respond:
+#             fmt_msgs = self.instruct_format.format_messages(messages, bot=True, eot=True,
+#                                                             append_continuation=True,
+#                                                             continue_role=response_role)
+#         else:
+#             fmt_msgs = self.instruct_format.format_messages(messages, bot=True, eot=False,
+#                                                             append_continuation=False)
+#         return self.generate(prompt=fmt_msgs, stream=stream)
 
-    def to_json(self):
-        """
-        Write this object out as a JSON object.
+#     def to_json(self):
+#         """
+#         Write this object out as a JSON object.
 
-        Returns: a string containing the JSON object
-        """
-        # define state to save
-        settings_to_download = {"model": self.model,
-                                "sampling_options": self.sampling_options,
-                                "instruct_format": self.instruct_format.to_json()
-                                }
-        # dump it to a JSON file
-        return json.dumps(settings_to_download)
+#         Returns: a string containing the JSON object
+#         """
+#         # define state to save
+#         settings_to_download = {"model": self.model,
+#                                 "sampling_options": self.sampling_options,
+#                                 "instruct_format": self.instruct_format.to_json()
+#                                 }
+#         # dump it to a JSON file
+#         return json.dumps(settings_to_download)
 
-    @classmethod
-    def from_json(cls, json_data):
-        """
-        Load saved session state from a JSON object.
-        Args:
-        json_data (str): JSON object or file containing session data
+#     @classmethod
+#     def from_json(cls, json_data):
+#         """
+#         Load saved session state from a JSON object.
+#         Args:
+#         json_data (str): JSON object or file containing session data
 
-        Returns: a new ChatSession object initialized from the JSON data
-        """
-        # load saved state
-        if type(json_data) == str:
-            uploaded_settings = json.loads(json_data)
-        else:
-            uploaded_settings = json.load(json_data)
-        # get model name
-        model_name = uploaded_settings.get('model')
-        # pull sampling options
-        samp_opts = uploaded_settings.get('sampling_options')
-        # read instruct format
-        inst_fmt = InstructFormat.from_json(uploaded_settings.get('instruct_format'))
-        # create new LLM object
-        new_obj = cls(model=model_name, sampling_options=samp_opts, instruct_fmt=inst_fmt)
-        # return object
-        return new_obj
+#         Returns: a new ChatSession object initialized from the JSON data
+#         """
+#         # load saved state
+#         if type(json_data) == str:
+#             uploaded_settings = json.loads(json_data)
+#         else:
+#             uploaded_settings = json.load(json_data)
+#         # get model name
+#         model_name = uploaded_settings.get('model')
+#         # pull sampling options
+#         samp_opts = uploaded_settings.get('sampling_options')
+#         # read instruct format
+#         inst_fmt = InstructFormat.from_json(uploaded_settings.get('instruct_format'))
+#         # create new LLM object
+#         new_obj = cls(model=model_name, sampling_options=samp_opts, instruct_fmt=inst_fmt)
+#         # return object
+#         return new_obj
 
 class OpenAILLM(LLM):
     """
     Interact with any OpenAI compatible backend.
     """
 
-    def __init__(self, model, sampling_options=None, instruct_fmt=None):
+    def __init__(self, model, sampling_options=None, instruct_fmt=None, api_key="none", base_url="http://127.0.0.1:8080/v1"):
         """
         Create a new LLM provided by an OpenAI-compatible API.
 
@@ -330,11 +342,13 @@ class OpenAILLM(LLM):
         model (str): Name of the LLM to use.
         sampling_options (dict): Dictionary of OpenAI sampling parameters to use.
         instruct_fmt (InstructFormat): The instruct format this LLM expects.
+        api_key (str): The API key to use; optional for local endpoints.
+        base_url (str): Location of the API endpoint.
         """
         self.model = model
         self.client = openai.OpenAI(
-            api_key="placeholder",
-            base_url="http://127.0.0.1:8080/v1",
+            api_key=api_key,
+            base_url=base_url,
             timeout=1200,
             max_retries=10
         )
@@ -448,8 +462,6 @@ class OpenAILLM(LLM):
         # now generate using regular completion endpoint
         result = self.generate(prompt=fmt_msgs, stream=stream)
         return result
-
-    import requests
 
     def count_tokens(self, text:str):
         """
