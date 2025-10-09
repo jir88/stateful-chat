@@ -8,7 +8,8 @@ import os
 st.set_page_config(page_title="Stateful Chatbot", page_icon="🤖")
 st.title("Stateful Chatbot")
 
-# initialize session state
+#========= Initialize session state =========
+
 if "chat_session" not in st.session_state:
     # set up LLM backend
     llm = scl.OpenAILLM(model="gemma-3-4B-it-UD-Q4_K_XL-cpu")
@@ -26,6 +27,8 @@ if "needs_regen" not in st.session_state:
 # make sure continue flag is initialized to 'False'
 if "needs_continue" not in st.session_state:
     st.session_state.needs_continue = False
+
+#========= Callback functions =========
 
 # callback to set regenerate flag
 def request_regen():
@@ -88,6 +91,41 @@ def get_continuation():
         st.write("Context length: " + str(st.session_state.context_length))
 
     return ogen_wrapper(o_gen)
+
+def update_llm_configuration():
+    """
+    Callback to parse the JSON LLM configurations and update the backend chat manager object.
+    """
+    # update main LLM
+    # update instruct format
+    fmt_idx = st.session_state.instruct_names.index(st.session_state.sb_main_inst_fmt)
+    st.session_state.chat_session.llm.instruct_format = st.session_state.instruct_formats[fmt_idx]
+    # update model, if changed
+    if st.session_state.ti_main_llm_name != st.session_state.chat_session.llm.model:
+        # keep original parameters
+        samp_opts = st.session_state.chat_session.llm.sampling_options
+        inst_fmt = st.session_state.chat_session.llm.instruct_format
+        # initialize new LLM
+        st.session_state.chat_session.llm = scl.OpenAILLM(model=st.session_state.ti_main_llm_name,
+                                                          sampling_options=samp_opts,
+                                                          instruct_fmt=inst_fmt)
+    # update sampling parameters
+    st.session_state.chat_session.llm.sampling_options = json.loads(st.session_state.ta_main_samp_opts)
+
+    # update LLM used for memory generation
+    fmt_idx = st.session_state.instruct_names.index(st.session_state.sb_mem_inst_fmt)
+    st.session_state.chat_session.chat_memory.summary_llm.instruct_format = st.session_state.instruct_formats[fmt_idx]
+    # update model, if changed
+    if st.session_state.ti_mem_llm_name != st.session_state.chat_session.chat_memory.summary_llm.model:
+        # keep original parameters
+        samp_opts = st.session_state.chat_session.chat_memory.summary_llm.sampling_options
+        inst_fmt = st.session_state.chat_session.chat_memory.summary_llm.instruct_format
+        st.session_state.chat_session.chat_memory.summary_llm = scl.OpenAILLM(model=st.session_state.ti_mem_llm_name,
+                                                          sampling_options=samp_opts,
+                                                          instruct_fmt=inst_fmt)
+    # update sampling parameters
+    st.session_state.chat_session.chat_memory.summary_llm.sampling_options = json.loads(st.session_state.ta_mem_samp_opts)
+
 
 # Construct tabs
 tab_main, tab_mem, tab_arch, tab_db, tab_settings = st.tabs(["Main", "Memory", "Archive", "Database", "Settings"])
@@ -297,50 +335,47 @@ with tab_db:
 
 with tab_settings:
     # main LLM model to use
-    llm_name = st.text_input("Main LLM:", st.session_state.chat_session.llm.model)
-    if llm_name != st.session_state.chat_session.llm.model:
-        # keep original parameters
-        samp_opts = st.session_state.chat_session.llm.sampling_options
-        inst_fmt = st.session_state.chat_session.llm.instruct_format
-        # initialize new LLM
-        # st.session_state.chat_session.llm = scl.OllamaLLM(model=llm_name,
-        #                                                   sampling_options=samp_opts,
-        #                                                   instruct_fmt=inst_fmt)
-        st.session_state.chat_session.llm = scl.OpenAILLM(model=llm_name,
-                                                          sampling_options=samp_opts,
-                                                          instruct_fmt=inst_fmt)
+    st.text_input(
+        "Main LLM:",
+        st.session_state.chat_session.llm.model,
+        key="ti_main_llm_name",
+        on_change=update_llm_configuration)
 
     # main chat format to use
-    fmt_name = st.selectbox("Main instruct format to use:", 
-                            options=st.session_state.instruct_names, 
-                            key="inst_fmt_box")
-    fmt_idx = st.session_state.instruct_names.index(fmt_name)
-    st.session_state.chat_session.llm.instruct_format = st.session_state.instruct_formats[fmt_idx]
+    st.selectbox(
+        "Main instruct format to use:", 
+        options=st.session_state.instruct_names, 
+        key="sb_main_inst_fmt",
+        on_change=update_llm_configuration)
     # main LLM sampling parameters
     formatted_text = json.dumps(st.session_state.chat_session.llm.sampling_options, indent=2)
-    edited_text = st.text_area("Edit main LLM sampling parameters:", formatted_text, height = 250)
-    st.session_state.chat_session.llm.sampling_options = json.loads(edited_text)
+    st.text_area(
+        "Edit main LLM sampling parameters:", 
+        formatted_text, 
+        height = 250, 
+        key="ta_main_samp_opts",
+        on_change=update_llm_configuration
+    )
     
     # memory LLM model to use
-    llm_name = st.text_input("Memory LLM:", st.session_state.chat_session.chat_memory.summary_llm.model,
-                            key='mem_llm_name')
-    if llm_name != st.session_state.chat_session.chat_memory.summary_llm.model:
-        # keep original parameters
-        samp_opts = st.session_state.chat_session.chat_memory.summary_llm.sampling_options
-        inst_fmt = st.session_state.chat_session.chat_memory.summary_llm.instruct_format
-        # initialize new LLM
-        # st.session_state.chat_session.chat_memory.llm = scl.OllamaLLM(model=llm_name,
-        #                                                   sampling_options=samp_opts,
-        #                                                   instruct_fmt=inst_fmt)
-        st.session_state.chat_session.chat_memory.summary_llm = scl.OpenAILLM(model=llm_name,
-                                                          sampling_options=samp_opts,
-                                                          instruct_fmt=inst_fmt)
+    st.text_input(
+        "Memory LLM:",
+        st.session_state.chat_session.chat_memory.summary_llm.model,
+        key="ti_mem_llm_name",
+        on_change=update_llm_configuration)
 
     # memory model chat format to use
-    fmt_name = st.selectbox("Memory LLM instruct format to use:", options=st.session_state.instruct_names, key="mem_inst_fmt_box")
-    fmt_idx = st.session_state.instruct_names.index(fmt_name)
-    st.session_state.chat_session.chat_memory.summary_llm.instruct_format = st.session_state.instruct_formats[fmt_idx]
+    st.selectbox(
+        "Memory LLM instruct format to use:", 
+        options=st.session_state.instruct_names, 
+        key="sb_mem_inst_fmt",
+        on_change=update_llm_configuration)
     # memory LLM sampling parameters
     formatted_text = json.dumps(st.session_state.chat_session.chat_memory.summary_llm.sampling_options, indent=2)
-    edited_text = st.text_area("Edit memory LLM sampling parameters:", formatted_text, height = 250)
-    st.session_state.chat_session.chat_memory.summary_llm.sampling_options = json.loads(edited_text)
+    st.text_area(
+        "Edit memory LLM sampling parameters:", 
+        formatted_text, 
+        height = 250, 
+        key="ta_mem_samp_opts",
+        on_change=update_llm_configuration
+    )
