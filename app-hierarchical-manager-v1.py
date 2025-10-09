@@ -145,6 +145,16 @@ def manual_thread_edit():
     # when the text area changes, put the new version into the session
     st.session_state.chat_session.chat_thread.import_readable(st.session_state.ta_manual_chat_edit)
 
+def update_memory_settings():
+    """
+    Update the parameters and prompts for hierarchical memory.
+    """
+    st.session_state.chat_session.chat_memory.summarization_prompt = st.session_state.ta_summary_prompt
+    st.session_state.chat_session.chat_memory.prop_ctx = st.session_state.ni_mem_prop_ctx
+    st.session_state.chat_session.chat_memory.prop_summary = st.session_state.ni_mem_prop_summary
+    st.session_state.chat_session.chat_memory.n_levels = st.session_state.ni_mem_n_levels
+    st.session_state.chat_session.chat_memory.n_tok_summarize = st.session_state.ni_mem_n_tok_summarize
+
 # Construct tabs
 tab_main, tab_mem, tab_arch, tab_db, tab_settings = st.tabs(["Main", "Memory", "Archive", "Database", "Settings"])
 # =============== Main Tab ========================
@@ -263,7 +273,9 @@ with tab_mem:
     st.session_state.chat_session.chat_memory.summarization_prompt = st.text_area(
         "Summarization system prompt:",
         st.session_state.chat_session.chat_memory.summarization_prompt,
-        height = 200
+        height = 200,
+        key="ta_summary_prompt",
+        on_change=update_memory_settings
         )
     st.session_state.chat_session.chat_memory.prop_ctx = st.number_input(
         "Maximum context proportion threshold:",
@@ -271,7 +283,9 @@ with tab_mem:
         min_value=0.0, 
         max_value=1.0,
         value=st.session_state.chat_session.chat_memory.prop_ctx, 
-        step=0.05
+        step=0.05,
+        key="ni_mem_prop_ctx",
+        on_change=update_memory_settings
         )
     st.session_state.chat_session.chat_memory.prop_summary = st.number_input(
         "Maximum summary proportion:",
@@ -279,20 +293,26 @@ with tab_mem:
         min_value=0.0, 
         max_value=1.0,
         value=st.session_state.chat_session.chat_memory.prop_summary, 
-        step=0.05
+        step=0.05,
+        key="ni_mem_prop_summary",
+        on_change=update_memory_settings
         )
     st.session_state.chat_session.chat_memory.n_levels = st.number_input(
         "Maximum number of summary levels:",
         min_value=1,
         value=st.session_state.chat_session.chat_memory.n_levels, 
-        step=1
+        step=1,
+        key="ni_mem_n_levels",
+        on_change=update_memory_settings
         )
     st.session_state.chat_session.chat_memory.n_tok_summarize = st.number_input(
         "Number of tokens to summarize:",
         help="The target number of tokens to summarize in one pass. If this corresponds to less than one message, that whole message will be summarized.",
         min_value=1,
         value=st.session_state.chat_session.chat_memory.n_tok_summarize, 
-        step=256
+        step=256,
+        key="ni_mem_n_tok_summarize",
+        on_change=update_memory_settings
         )
     
     # mode-switching check-box
