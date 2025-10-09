@@ -47,8 +47,8 @@ def load_state():
         return
     st.session_state.chat_session = scm.HierarchicalSummaryManager.from_json(session_file)
     # set the instruct formats properly in their select boxes
-    st.session_state.inst_fmt_box = st.session_state.chat_session.llm.instruct_format.name
-    st.session_state.mem_inst_fmt_box = st.session_state.chat_session.chat_memory.summary_llm.instruct_format.name
+    st.session_state.sb_main_inst_fmt = st.session_state.chat_session.llm.instruct_format.name
+    st.session_state.sb_mem_inst_fmt = st.session_state.chat_session.chat_memory.summary_llm.instruct_format.name
 
 # method to load all available instruct formats so we can offer them to the user
 def load_instruct_formats():
