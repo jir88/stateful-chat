@@ -61,6 +61,7 @@ def load_instruct_formats():
         inst_fmt = scl.InstructFormat.from_json(open(ff, mode='r'))
         fmt_obj.append(inst_fmt)
     return fmt_obj
+
 # if instruct formats aren't loaded, do that now
 if "instruct_formats" not in st.session_state:
     # load available formats
@@ -126,6 +127,23 @@ def update_llm_configuration():
     # update sampling parameters
     st.session_state.chat_session.chat_memory.summary_llm.sampling_options = json.loads(st.session_state.ta_mem_samp_opts)
 
+def update_chat_thread_settings():
+    """
+    Update the chat thread settings: system prompt, user role, and AI role.
+    """
+    # set the base system prompt
+    st.session_state.chat_session.chat_thread.system_prompt = st.session_state.ta_sys_prompt
+    # set the user role
+    st.session_state.chat_session.chat_thread.user_role = st.session_state.ti_user_role
+    # set the AI/assistant role
+    st.session_state.chat_session.chat_thread.ai_role = st.session_state.ti_ai_role
+
+def manual_thread_edit():
+    """
+    Update the chat messages after user has manually modified them.
+    """
+    # when the text area changes, put the new version into the session
+    st.session_state.chat_session.chat_thread.import_readable(st.session_state.ta_manual_chat_edit)
 
 # Construct tabs
 tab_main, tab_mem, tab_arch, tab_db, tab_settings = st.tabs(["Main", "Memory", "Archive", "Database", "Settings"])
@@ -133,20 +151,36 @@ tab_main, tab_mem, tab_arch, tab_db, tab_settings = st.tabs(["Main", "Memory", "
 
 with tab_main:
     # Base system prompt
-    st.session_state.chat_session.chat_thread.system_prompt = st.text_area("System prompt:", st.session_state.chat_session.chat_thread.system_prompt, height = 70)
+    st.text_area(
+        "System prompt:",
+        st.session_state.chat_session.chat_thread.system_prompt, 
+        height = 70, 
+        key = "ta_sys_prompt",
+        on_change=update_chat_thread_settings)
     
     # conversation roles
-    st.session_state.chat_session.chat_thread.user_role = st.text_input("User role:", st.session_state.chat_session.chat_thread.user_role)
-    st.session_state.chat_session.chat_thread.ai_role = st.text_input("AI role:", st.session_state.chat_session.chat_thread.ai_role)
+    st.text_input(
+        "User role:", 
+        st.session_state.chat_session.chat_thread.user_role,
+        key="ti_user_role",
+        on_change=update_chat_thread_settings)
+    st.text_input(
+        "AI role:", 
+        st.session_state.chat_session.chat_thread.ai_role,
+        key="ti_ai_role",
+        on_change=update_chat_thread_settings)
     
     # mode-switching check-box
     if st.checkbox(label = "Manual editing mode"):
         # we're using manual mode
         # convert conversation to text and stick it in a text editor
         formatted_text = st.session_state.chat_session.chat_thread.format_readable()
-        edited_text = st.text_area("Edit raw conversation text:", formatted_text, height = 500)
-        # when the text area changes, put the new version into the session
-        st.session_state.chat_session.chat_thread.import_readable(edited_text)
+        st.text_area(
+            "Edit raw conversation text:", 
+            formatted_text, 
+            height = 500,
+            key="ta_manual_chat_edit",
+            on_change=manual_thread_edit)
     else:
         # we're in automatic mode
         # do we need to regenerate a message?
