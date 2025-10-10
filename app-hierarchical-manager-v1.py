@@ -162,6 +162,16 @@ def manual_memory_edit():
     # when the text area changes, put the new version into the session
     st.session_state.chat_session.chat_memory.import_readable(st.session_state.ta_mem_editor)
 
+def update_entity_settings():
+    """
+    Update the entity prompt or entity list.
+    """
+    # the entity prompt
+    st.session_state.chat_session.chat_memory.prompt_entity_list = st.session_state.ta_entity_prompt
+    # if we have a current entity list, update it
+    if st.session_state.chat_session.chat_memory.entity_list is not None:
+        st.session_state.chat_session.chat_memory.entity_list = st.session_state.ta_entity_list
+
 # Construct tabs
 tab_main, tab_mem, tab_arch, tab_db, tab_settings = st.tabs(["Main", "Memory", "Archive", "Database", "Settings"])
 # =============== Main Tab ========================
@@ -346,11 +356,23 @@ with tab_mem:
         # end chat container
     # end auto/manual selection
     
-    st.session_state.chat_session.chat_memory.prompt_entity_list = st.text_area("Entity list prompt:", st.session_state.chat_session.chat_memory.prompt_entity_list, height = 150)
+    st.text_area(
+        "Entity list prompt:", 
+        st.session_state.chat_session.chat_memory.prompt_entity_list, 
+        height = 150,
+        key="ta_entity_prompt",
+        on_change=update_entity_settings
+    )
+    # only include entity list editor if we have entities
     if st.session_state.chat_session.chat_memory.entity_list is None:
         st.write("Entity list: None")
     else:
-        st.session_state.chat_session.chat_memory.entity_list = st.text_area("Entity list:", st.session_state.chat_session.chat_memory.entity_list, height = 150)
+        st.text_area(
+            "Entity list:", 
+            st.session_state.chat_session.chat_memory.entity_list, 
+            height = 150,
+            key="ta_entity_list",
+            on_change=update_entity_settings)
     
     # calculate sizes of all summary levels and print them
     if st.button(label="Context size"):
