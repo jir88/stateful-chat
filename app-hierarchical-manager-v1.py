@@ -155,6 +155,13 @@ def update_memory_settings():
     st.session_state.chat_session.chat_memory.n_levels = st.session_state.ni_mem_n_levels
     st.session_state.chat_session.chat_memory.n_tok_summarize = st.session_state.ni_mem_n_tok_summarize
 
+def manual_memory_edit():
+    """
+    Update memories after the user has manually modified them.
+    """
+    # when the text area changes, put the new version into the session
+    st.session_state.chat_session.chat_memory.import_readable(st.session_state.ta_mem_editor)
+
 # Construct tabs
 tab_main, tab_mem, tab_arch, tab_db, tab_settings = st.tabs(["Main", "Memory", "Archive", "Database", "Settings"])
 # =============== Main Tab ========================
@@ -270,14 +277,14 @@ with tab_main:
 
 # NOTE: this version assumes that manager is using HierarchicalSummaryMemory!!!
 with tab_mem:
-    st.session_state.chat_session.chat_memory.summarization_prompt = st.text_area(
+    st.text_area(
         "Summarization system prompt:",
         st.session_state.chat_session.chat_memory.summarization_prompt,
         height = 200,
         key="ta_summary_prompt",
         on_change=update_memory_settings
         )
-    st.session_state.chat_session.chat_memory.prop_ctx = st.number_input(
+    st.number_input(
         "Maximum context proportion threshold:",
         help="Proportion of the total context window that summaries plus un-summarized messages may use up before triggering a higher-level summary.",
         min_value=0.0, 
@@ -287,7 +294,7 @@ with tab_mem:
         key="ni_mem_prop_ctx",
         on_change=update_memory_settings
         )
-    st.session_state.chat_session.chat_memory.prop_summary = st.number_input(
+    st.number_input(
         "Maximum summary proportion:",
         help="The proportion of a message/summary level that can be occupied by messages/summaries of higher level. Each summary level is allocated prop_summary of the context alloted to the next higher level (total context window for original thread messages).",
         min_value=0.0, 
@@ -297,7 +304,7 @@ with tab_mem:
         key="ni_mem_prop_summary",
         on_change=update_memory_settings
         )
-    st.session_state.chat_session.chat_memory.n_levels = st.number_input(
+    st.number_input(
         "Maximum number of summary levels:",
         min_value=1,
         value=st.session_state.chat_session.chat_memory.n_levels, 
@@ -305,7 +312,7 @@ with tab_mem:
         key="ni_mem_n_levels",
         on_change=update_memory_settings
         )
-    st.session_state.chat_session.chat_memory.n_tok_summarize = st.number_input(
+    st.number_input(
         "Number of tokens to summarize:",
         help="The target number of tokens to summarize in one pass. If this corresponds to less than one message, that whole message will be summarized.",
         min_value=1,
@@ -320,9 +327,13 @@ with tab_mem:
         # we're using manual mode
         # convert summaries to text and stick them in a text editor
         formatted_text = st.session_state.chat_session.chat_memory.format_readable()
-        edited_text = st.text_area("Edit raw summary text:", formatted_text, height = 500)
-        # when the text area changes, put the new version into the session
-        st.session_state.chat_session.chat_memory.import_readable(edited_text)
+        st.text_area(
+            "Edit raw summary text:", 
+            formatted_text, 
+            height = 500,
+            key="ta_mem_editor",
+            on_change=manual_memory_edit
+        )
     else:
         # we're in automatic mode
         # now render conversation history in container
