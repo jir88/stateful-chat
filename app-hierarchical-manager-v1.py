@@ -363,16 +363,15 @@ with tab_mem:
         key="ta_entity_prompt",
         on_change=update_entity_settings
     )
-    # only include entity list editor if we have entities
+    # manual entity editor
     if st.session_state.chat_session.chat_memory.entity_list is None:
-        st.write("Entity list: None")
-    else:
-        st.text_area(
-            "Entity list:", 
-            st.session_state.chat_session.chat_memory.entity_list, 
-            height = 150,
-            key="ta_entity_list",
-            on_change=update_entity_settings)
+        st.session_state.chat_session.chat_memory.entity_list = ""
+    st.text_area(
+        "Entity list:", 
+        st.session_state.chat_session.chat_memory.entity_list, 
+        height = 150,
+        key="ta_entity_list",
+        on_change=update_entity_settings)
     
     # calculate sizes of all summary levels and print them
     if st.button(label="Context size"):
