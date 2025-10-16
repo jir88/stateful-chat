@@ -5,8 +5,8 @@ import json
 import os
 
 # app config
-st.set_page_config(page_title="Stateful Chatbot", page_icon="🤖")
-st.title("Stateful Chatbot")
+st.set_page_config(page_title="Tater Talk", page_icon="🥔")
+st.title("Tater Talk")
 
 #========= Initialize session state =========
 
