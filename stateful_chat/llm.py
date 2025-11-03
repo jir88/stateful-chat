@@ -3,6 +3,17 @@ import json
 # import llama_cpp
 import openai
 import requests
+from abc import ABC
+from typing import Union,ClassVar,Dict,Optional,Any
+from pydantic import BaseModel,TypeAdapter,Field
+
+# boilerplate to allow automatically casting serialized LLMs to the proper class
+# use the @register decorator to register classes with this registry
+# llm_class_registry = {}
+
+# def register(cls):
+#     llm_class_registry[cls.__fields__['llm_class'].default] = cls
+#     return cls
 
 class LLM:
     """
@@ -536,23 +547,19 @@ class OpenAILLM(LLM):
         # return object
         return new_obj
 
-class InstructFormat:
+class InstructFormat(BaseModel):
     """
     A class to represent the formatting expected by an instruct-tuned LLM.
     """
-    
-    def __init__(self, name, message_template, begin_of_text, end_of_turn, continue_template):
-        """
-        Initializes the instruct format.
 
-        Args:
-        session_id (str): The unique identifier of the chat session.
-        """
-        self.name = name
-        self.message_template = message_template
-        self.begin_of_text = begin_of_text
-        self.end_of_turn = end_of_turn
-        self.continue_template = continue_template
+    name: str = Field(..., description="User-friendly name for this format.")
+    message_template: str = Field(..., description="Formattable string giving the layout of a single message.")
+    begin_of_text: str = Field(
+        default="",
+        description="Special text to put at the beginning of a series of instruct messages."
+    )
+    end_of_turn: str = Field(..., description="Special text to put at the end of every individual message.")
+    continue_template: str = Field(..., description="Formattable string for when the LLM should continue the last message.")
 
     def format_message(self, role, content, eot=True):
         fmt_txt = self.message_template.format(role=role, content=content)
@@ -596,51 +603,14 @@ class InstructFormat:
             fmt_msgs += self.continue_template.format(role=continue_role)
         return fmt_msgs
 
-    def to_json(self):
-        """
-        Write this object out as a JSON object.
-
-        Returns: a string containing the JSON object
-        """
-        # define state to save
-        settings_to_download = {
-            "name": self.name,
-            "begin_of_text": self.begin_of_text,
-            "message_template": self.message_template,
-            "end_of_turn": self.end_of_turn,
-            "continue_template": self.continue_template
-            }
-        # dump it to a JSON file
-        return json.dumps(settings_to_download)
-
-    @classmethod
-    def from_json(cls, json_data):
-        """
-        Load saved instruct format from a JSON object.
-        Args:
-        json_data (str): JSON object or file containing instruct formatting data
-
-        Returns: a new InstructFormat object initialized from the JSON data
-        """
-        # load saved state
-        # if data is a string
-        if type(json_data) == str:
-            uploaded_settings = json.loads(json_data)
-        else:
-            uploaded_settings = json.load(json_data)
-        # create new session object
-        new_fmt = cls(name=uploaded_settings["name"],
-                      begin_of_text=uploaded_settings["begin_of_text"],
-                      message_template=uploaded_settings["message_template"],
-                      end_of_turn=uploaded_settings["end_of_turn"],
-                     continue_template=uploaded_settings["continue_template"]
-                     )
-        # return object
-        return new_fmt
-
 if __name__ == "__main__":
-    # test OpenAILLM
+    # print(str(llm_class_registry))
+
+    # test loading an instruct format from file
     inst_fmt = InstructFormat.from_json(open("./instruct_formats/gemma_chat.json", mode="r"))
+    print("Instruct format:\n" + inst_fmt.model_dump_json(indent=2))
+
+    # test OpenAILLM
     samp_params = {
         "temperature": 1.6,
         "min_p": 0.01,
