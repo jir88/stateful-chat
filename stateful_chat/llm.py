@@ -15,10 +15,71 @@ from pydantic import BaseModel,TypeAdapter,Field
 #     llm_class_registry[cls.__fields__['llm_class'].default] = cls
 #     return cls
 
-class LLM:
+class InstructFormat(BaseModel):
+    """
+    A class to represent the formatting expected by an instruct-tuned LLM.
+    """
+
+    name: str = Field(..., description="User-friendly name for this format.")
+    message_template: str = Field(..., description="Formattable string giving the layout of a single message.")
+    begin_of_text: str = Field(
+        default="",
+        description="Special text to put at the beginning of a series of instruct messages."
+    )
+    end_of_turn: str = Field(..., description="Special text to put at the end of every individual message.")
+    continue_template: str = Field(..., description="Formattable string for when the LLM should continue the last message.")
+
+    def format_message(self, role, content, eot=True):
+        fmt_txt = self.message_template.format(role=role, content=content)
+        if eot:
+            fmt_txt += self.end_of_turn
+        return self.message_template.format(role=role, content=content)
+
+    def format_messages(self, messages, bot=True, eot=True, append_continuation=True, continue_role=None):
+        """
+        Format a list of message dicts. Each message must have keys 'role' and 'content'.
+
+        Args:
+        bot (bool): Should the beginning-of-turn text be added before the messages?
+        eot (bool): Should the end-of-turn text be added after the last message? Set to false if
+            you want the LLM to continue generating from the end of the last message.
+        append_continuation (bool): Should start of next turn be appended? If true, this overrides 
+            paramter 'eot' and always includes the end-of-turn on the previous message.
+        continue_role (str): If appending start of next turn, what role should be used?
+        """
+        if bot:
+            fmt_msgs = self.begin_of_text
+        else:
+            fmt_msgs = ""
+        if len(messages) > 1:
+            for msg in messages[:-1]:
+                fmt_msgs += self.message_template.format(role=msg['role'], content=msg['content'])
+                # always put end-of-turn between messages
+                fmt_msgs += self.end_of_turn
+        fmt_msgs += self.message_template.format(role=messages[-1]['role'], content=messages[-1]['content'])
+        # add end-of-turn tokens after last message, if requested
+        if eot:
+            fmt_msgs += self.end_of_turn
+        # add the beginning of an AI response
+        if append_continuation:
+            # force end-of-turn
+            if not eot:
+                fmt_msgs += self.end_of_turn
+            # if no role specified, default to AI
+            if continue_role is None:
+                continue_role = self.ai_role
+            fmt_msgs += self.continue_template.format(role=continue_role)
+        return fmt_msgs
+
+class LLM(BaseModel, ABC):
     """
     Generic large language model interface. Extend this class to implement specific LLM providers.
     """
+
+    llm_class:str
+
+    class Config:
+        arbitrary_types_allowed = True
 
     def generate(self, prompt, stream=True):
         """
@@ -61,33 +122,6 @@ class LLM:
         int: The (approximate) number of tokens in the input string.
         """
         raise NotImplementedError("Method must be implemented in a subclass!")
-
-    @classmethod
-    def from_json(cls, json_data):
-        """
-        Load saved LLM from a JSON object. Depending on the declared type in the JSON
-        object, this method will return an appropriate subclass of LLM. Currently 
-        supports OllamaLLM and LlamaCppPythonLLM.
-        
-        Args:
-        json_data (str): JSON object or file containing LLM data
-
-        Returns: a new object with the appropriate LLM class initialized from the JSON data
-        """
-        # load saved state
-        if type(json_data) == str:
-            uploaded_settings = json.loads(json_data)
-        else:
-            uploaded_settings = json.load(json_data)
-        # get LLM class
-        class_type = uploaded_settings.get('class')
-        # pass to appropriate subclass
-        if class_type == 'OllamaLLM':
-            return OllamaLLM.from_json(json_data)
-        elif class_type == 'LlamaCppPythonLLM':
-            return LlamaCppPythonLLM.from_json(json_data)
-        else:
-            raise NotImplementedError("Unrecognized LLM type: " + class_type)
 
 # class OllamaLLM(LLM):
 #     """
@@ -344,46 +378,51 @@ class OpenAILLM(LLM):
     """
     Interact with any OpenAI compatible backend.
     """
+    # type name for deserialization
+    llm_class: ClassVar[str] = "OpenAILLM"
 
-    def __init__(self, model, sampling_options=None, instruct_fmt=None, api_key="none", base_url="http://127.0.0.1:8080/v1"):
-        """
-        Create a new LLM provided by an OpenAI-compatible API.
+    model: str = Field(..., description="Name of the LLM to use.")
+    sampling_options: Optional[Dict[str, Any]] = Field(
+        default={
+            "num_predict": 1024,
+            "num_ctx": 8192,
+            "temperature": 1.0,
+            "min_p": 0.1,
+            "keep_alive": "15m"
+        },
+        description="Dictionary of OpenAI-compatible sampling parameters to use."
+    )
+    instruct_format: Optional[InstructFormat] = Field(
+        default=InstructFormat(
+            name="Basic Chat",
+            begin_of_text = "",
+            message_template="{role}:\n{content}",
+            end_of_turn="\n\n",
+            continue_template="{role}:\n"
+            ),
+        description="The instruct format this LLM expects."
+    )
+    api_key: str = Field(
+        default="sk_fake",
+        description="The API key to use; can use an arbitrary string for local endpoints that do not require a key."
+    )
+    base_url: str = Field(
+        default="http://127.0.0.1:8080/v1",
+        description="The URL of the API endpoint."
+    )
+    # client field is only populated at runtime
+    client: Optional[Any] = Field(default=None, exclude=True)
 
-        Args:
-        model (str): Name of the LLM to use.
-        sampling_options (dict): Dictionary of OpenAI sampling parameters to use.
-        instruct_fmt (InstructFormat): The instruct format this LLM expects.
-        api_key (str): The API key to use; optional for local endpoints.
-        base_url (str): Location of the API endpoint.
+    def model_post_init(self, contex:Any) -> None:
         """
-        self.model = model
+        Called to set up the OpenAI client object once the object is initialized.
+        """
         self.client = openai.OpenAI(
-            api_key=api_key,
-            base_url=base_url,
+            api_key=self.api_key,
+            base_url=self.base_url,
             timeout=1200,
             max_retries=10
         )
-        # if no options specified, we provide some reasonable defaults
-        if sampling_options is None:
-            self.sampling_options = {
-                "num_predict": 512,
-                "num_ctx": 4096,
-                "temperature": 1.0,
-                "min_p": 0.1,
-                #"stop": self.stop_words,
-                "keep_alive": "15m"
-            }
-        else: # use the user-supplied options
-            self.sampling_options = sampling_options
-        # use generic instruct format if none specified
-        if instruct_fmt is None:
-            self.instruct_format = InstructFormat(name="Basic Chat",
-                                                  begin_of_text = "",
-                                                  message_template="{role}:\n{content}",
-                                                  end_of_turn="\n\n",
-                                                  continue_template="{role}:\n")
-        else:
-            self.instruct_format = instruct_fmt
 
     def generate(self, prompt, stream=True):
         """
@@ -508,106 +547,15 @@ class OpenAILLM(LLM):
             print(f"Error: {response.status_code} - {response.text}")
             return None
 
-    def to_json(self):
-        """
-        Write this object out as a JSON object.
-
-        Returns: a string containing the JSON object
-        """
-        # define state to save
-        settings_to_download = {"model": self.model,
-                                "sampling_options": self.sampling_options,
-                                "instruct_format": self.instruct_format.to_json()
-                                }
-        # dump it to a JSON file
-        return json.dumps(settings_to_download)
-
-    @classmethod
-    def from_json(cls, json_data):
-        """
-        Load saved session state from a JSON object.
-        Args:
-        json_data (str): JSON object or file containing session data
-
-        Returns: a new ChatSession object initialized from the JSON data
-        """
-        # load saved state
-        if type(json_data) == str:
-            uploaded_settings = json.loads(json_data)
-        else:
-            uploaded_settings = json.load(json_data)
-        # get model name
-        model_name = uploaded_settings.get('model')
-        # pull sampling options
-        samp_opts = uploaded_settings.get('sampling_options')
-        # read instruct format
-        inst_fmt = InstructFormat.from_json(uploaded_settings.get('instruct_format'))
-        # create new LLM object
-        new_obj = cls(model=model_name, sampling_options=samp_opts, instruct_fmt=inst_fmt)
-        # return object
-        return new_obj
-
-class InstructFormat(BaseModel):
-    """
-    A class to represent the formatting expected by an instruct-tuned LLM.
-    """
-
-    name: str = Field(..., description="User-friendly name for this format.")
-    message_template: str = Field(..., description="Formattable string giving the layout of a single message.")
-    begin_of_text: str = Field(
-        default="",
-        description="Special text to put at the beginning of a series of instruct messages."
-    )
-    end_of_turn: str = Field(..., description="Special text to put at the end of every individual message.")
-    continue_template: str = Field(..., description="Formattable string for when the LLM should continue the last message.")
-
-    def format_message(self, role, content, eot=True):
-        fmt_txt = self.message_template.format(role=role, content=content)
-        if eot:
-            fmt_txt += self.end_of_turn
-        return self.message_template.format(role=role, content=content)
-
-    def format_messages(self, messages, bot=True, eot=True, append_continuation=True, continue_role=None):
-        """
-        Format a list of message dicts. Each message must have keys 'role' and 'content'.
-
-        Args:
-        bot (bool): Should the beginning-of-turn text be added before the messages?
-        eot (bool): Should the end-of-turn text be added after the last message? Set to false if
-            you want the LLM to continue generating from the end of the last message.
-        append_continuation (bool): Should start of next turn be appended? If true, this overrides 
-            paramter 'eot' and always includes the end-of-turn on the previous message.
-        continue_role (str): If appending start of next turn, what role should be used?
-        """
-        if bot:
-            fmt_msgs = self.begin_of_text
-        else:
-            fmt_msgs = ""
-        if len(messages) > 1:
-            for msg in messages[:-1]:
-                fmt_msgs += self.message_template.format(role=msg['role'], content=msg['content'])
-                # always put end-of-turn between messages
-                fmt_msgs += self.end_of_turn
-        fmt_msgs += self.message_template.format(role=messages[-1]['role'], content=messages[-1]['content'])
-        # add end-of-turn tokens after last message, if requested
-        if eot:
-            fmt_msgs += self.end_of_turn
-        # add the beginning of an AI response
-        if append_continuation:
-            # force end-of-turn
-            if not eot:
-                fmt_msgs += self.end_of_turn
-            # if no role specified, default to AI
-            if continue_role is None:
-                continue_role = self.ai_role
-            fmt_msgs += self.continue_template.format(role=continue_role)
-        return fmt_msgs
 
 if __name__ == "__main__":
     # print(str(llm_class_registry))
 
     # test loading an instruct format from file
-    inst_fmt = InstructFormat.from_json(open("./instruct_formats/gemma_chat.json", mode="r"))
+    with open("./instruct_formats/gemma_chat.json", mode="r") as file:
+        inst_data = file.read()
+    inst_fmt = InstructFormat.model_validate_json(inst_data)
+    # inst_fmt = InstructFormat.from_json(open("./instruct_formats/gemma_chat.json", mode="r"))
     print("Instruct format:\n" + inst_fmt.model_dump_json(indent=2))
 
     # test OpenAILLM
@@ -621,59 +569,65 @@ if __name__ == "__main__":
         sampling_options=samp_params,
         instruct_fmt=inst_fmt
     )
+    # test converting to JSON
+    llm_txt = llm.model_dump_json(indent=2)
+    print(llm_txt)
 
-    print("Generating in instruct mode...")
-    test_messages = [
-        {
-            "role": "user",
-            "content": "I'm a cat! What are you?"
-        }
-    ]
-    response = llm.generate_instruct(
-        messages=test_messages,
-        respond=True,
-        response_role="assistant",
-        stream=False
-    )
-    print(response)
-    for chunk in response:
-        print(chunk)
-       
-    print("Generating in raw mode...") 
-    response = llm.generate(
-        prompt="I'm a cat, what are you?",
-        stream=False
-    )
-    print(response)
-    for chunk in response:
-        print(chunk)
+    # test converting back
+    rehydrated_llm = OpenAILLM.model_validate_json(llm_txt)
     
-    # Streaming output
-
-    print("Streaming in instruct mode...")
-    test_messages = [
-        {
-            "role": "user",
-            "content": "I'm a cat! What are you?"
-        }
-    ]
-    response = llm.generate_instruct(
-        messages=test_messages,
-        respond=True,
-        response_role="assistant",
-        stream=True
-    )
-    print(response)
-    for chunk in response:
-        print(chunk)
+    # print("Generating in instruct mode...")
+    # test_messages = [
+    #     {
+    #         "role": "user",
+    #         "content": "I'm a cat! What are you?"
+    #     }
+    # ]
+    # response = llm.generate_instruct(
+    #     messages=test_messages,
+    #     respond=True,
+    #     response_role="assistant",
+    #     stream=False
+    # )
+    # print(response)
+    # for chunk in response:
+    #     print(chunk)
        
-    print("Streaming in raw mode...") 
-    response = llm.generate(
-        prompt="I'm a cat, what are you?",
-        stream=True
-    )
-    print(response)
-    for chunk in response:
-        print(chunk)
+    # print("Generating in raw mode...") 
+    # response = llm.generate(
+    #     prompt="I'm a cat, what are you?",
+    #     stream=False
+    # )
+    # print(response)
+    # for chunk in response:
+    #     print(chunk)
+    
+    # # Streaming output
+
+    # print("Streaming in instruct mode...")
+    # test_messages = [
+    #     {
+    #         "role": "user",
+    #         "content": "I'm a cat! What are you?"
+    #     }
+    # ]
+    # response = llm.generate_instruct(
+    #     messages=test_messages,
+    #     respond=True,
+    #     response_role="assistant",
+    #     stream=True
+    # )
+    # print(response)
+    # for chunk in response:
+    #     print(chunk)
+       
+    # print("Streaming in raw mode...") 
+    # response = llm.generate(
+    #     prompt="I'm a cat, what are you?",
+    #     stream=True
+    # )
+    # print(response)
+    # for chunk in response:
+    #     print(chunk)
     
     
