@@ -3,7 +3,7 @@ import uuid
 import json
 import re
 from typing import List, Optional, Dict, Any, Iterator
-from pydantic import BaseModel, Field, root_validator
+from pydantic import BaseModel, Field, root_validator, SerializeAsAny
 from abc import ABC
 
 
@@ -1031,7 +1031,7 @@ class SimpleEntityManager(EntityManager):
     block of text.
     """
 
-    llm: LLM = Field(..., description="LLM instance used to generate the entity list")
+    llm: SerializeAsAny[LLM] = Field(..., description="LLM instance used to generate the entity list")
     entity_list: Optional[str] = Field(None, description="Current entity list as a free-form list in a single string")
     prompt_entity_list: str = Field(
         default=(
