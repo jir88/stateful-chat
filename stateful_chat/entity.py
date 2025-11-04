@@ -1,8 +1,8 @@
 from abc import ABC
 from typing import List, Optional, Dict, Any
-from pydantic import BaseModel,Field,SerializeAsAny
+from pydantic import BaseModel,Field,SerializeAsAny,root_validator
 
-from stateful_chat.llm import LLM
+from .llm import LLM
 
 class Entity:
     """A single entity mentioned in a chat thread."""
