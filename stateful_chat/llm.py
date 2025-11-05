@@ -413,7 +413,7 @@ class OpenAILLM(LLM):
     # client field is only populated at runtime
     client: Optional[Any] = Field(default=None, exclude=True)
 
-    def model_post_init(self, contex:Any) -> None:
+    def model_post_init(self, context:Any) -> None:
         """
         Called to set up the OpenAI client object once the object is initialized.
         """
