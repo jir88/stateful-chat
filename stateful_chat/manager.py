@@ -141,6 +141,11 @@ class ChatMemory(ABC, BaseModel):
     their context lengths.
     """
 
+    chat_thread: ChatThread = Field(
+        default=...,
+        description="The chat thread associated with this memory object."
+    )
+    
     class Config:
         arbitrary_types_allowed = True
 
@@ -442,10 +447,6 @@ class HierarchicalSummaryMemory(ChatMemory):
     summary_llm: SerializeAsAny[LLM] = Field(
         default=...,
         description="The LLM model to use when generating summaries. NOTE: make sure this model has the same allocated context window size as the main LLM!"
-    )
-    chat_thread: ChatThread = Field(
-        default=...,
-        description="The chat thread associated with this memory object."
     )
     entity_manager: SerializeAsAny[EntityManager] = Field(
         default=...,
