@@ -8,6 +8,7 @@ from abc import ABC
 
 
 from stateful_chat.llm import OpenAILLM,InstructFormat,LLM
+from stateful_chat.entity import Entity,EntityManager,SimpleEntityManager
 
 class StatefulChatManager:
     """
@@ -424,10 +425,13 @@ class HierarchicalSummaryManager(StatefulChatManager):
             summary_llm = llm
         # create empty chat thread
         self.chat_thread = ChatThread(str(uuid.uuid4()))
+        # create entity manager
+        self.entity_manager = SimpleEntityManager(llm=summary_llm)
         # create empty memory store
         self.chat_memory = HierarchicalSummaryMemory(
             summary_llm=summary_llm,
             chat_thread=self.chat_thread,
+            entity_manager=self.entity_manager,
             prop_ctx=prop_ctx,
             prop_summary=prop_summary,
             n_levels=n_levels,
@@ -537,8 +541,10 @@ class HierarchicalSummaryMemory(ChatMemory):
     and the chat message index where the last summarized message is located.
     """
 
-    def __init__(
-        self, summary_llm:LLM, chat_thread:ChatThread,
+    def __init__(self,
+        summary_llm:LLM,
+        chat_thread:ChatThread,
+        entity_manager:EntityManager,
         summary_prompt:str = None,
         prop_ctx:float=0.8,
         prop_summary:float=0.5,
@@ -568,6 +574,7 @@ class HierarchicalSummaryMemory(ChatMemory):
         """
         self.summary_llm = summary_llm
         self.chat_thread = chat_thread
+        self.entity_manager = entity_manager
         self.prop_ctx = prop_ctx
         self.prop_summary = prop_summary
         self.n_levels = n_levels
@@ -587,17 +594,6 @@ class HierarchicalSummaryMemory(ChatMemory):
         self.all_memory = []
         # summaries which have been collapsed into the top-level summary go here
         self.archived_memory = []
-        # free-form text description of important entities (people/places/things) in the memories
-        self.entity_list = None
-        # and the default prompt to generate it
-        self.prompt_entity_list = """You are creating a list of all important entities mentioned thus far and a brief description of each. You will be given any relevant prior context and the user will provide the messages from which you should extract or update entities. For people, include a brief description of their personalities and appearance. Write more detailed descriptions for more important entities.
-        Prior context:
-        {context}
-
-        Existing list of entities to be updated:
-        {entities}
-
-        Now the user will provide you with the messages from which you should extract entity information. Respond only with a list of significant entities and a brief description of each entity, no additional commentary."""
 
     def update_all_memory(self):
         """
@@ -701,7 +697,7 @@ class HierarchicalSummaryMemory(ChatMemory):
                 prior_summaries=self.all_memory
             )
             # update entity list
-            self.entity_list = self._update_entities(
+            self.entity_manager.update_entities(
                 messages=summarized_messages,
                 prior_summaries=self.all_memory[:start_summ_index]
             )
@@ -745,47 +741,6 @@ class HierarchicalSummaryMemory(ChatMemory):
             'content': "Please summarize the following messages:\n\n" + "\n\n".join([m['content'] for m in messages])
         }
         # generate the summary
-        llm_response = self.summary_llm.generate_instruct(
-            messages=[sys_prompt, user_prompt],
-            respond=True,
-            response_role="assistant",
-            stream=False
-        )
-        # pull the first/only result off the generator and strip whitespace
-        return next(llm_response)['response'].strip()
-
-    def _update_entities(self, messages:list, prior_summaries:list=[]):
-        """
-        Update a free-form list of previously-mentioned entities, optionally including a list of 
-        older summaries as context.
-
-        Args:
-        messages (list): a list of messages to extract/update entities from
-        prior_summaries (list): a list of older summaries to be used as context when updating
-
-        Returns: the updated entity list
-        """
-        # if no prior context, just put 'None' in as a placeholder
-        if len(prior_summaries) == 0:
-            prior_summaries = [{ 'content': "No prior context." }]
-        # if no existing entity list, put in a placeholder
-        old_ent_list = self.entity_list
-        if old_ent_list is None or len(old_ent_list) == 0:
-            old_ent_list = "No prior entity list available."
-        
-        # construct system prompt
-        sys_prompt = {
-            'role': 'system',
-            'content': self.prompt_entity_list.format(
-                context="\n\n".join([ps['content'] for ps in prior_summaries]),
-                entities=old_ent_list
-            )
-        }
-        user_prompt = {
-            'role': 'user',
-            'content': "Please update the entity list using information from the following messages:\n\n" + "\n\n".join([m['content'] for m in messages])
-        }
-        # generate the entity list
         llm_response = self.summary_llm.generate_instruct(
             messages=[sys_prompt, user_prompt],
             respond=True,
@@ -933,8 +888,6 @@ class HierarchicalSummaryMemory(ChatMemory):
                                 "n_tok_summarize": self.n_tok_summarize,
                                 "all_memory": self.all_memory,
                                 "archived_memory": self.archived_memory,
-                                "entity_list": self.entity_list,
-                                "prompt_entity_list": self.prompt_entity_list
                                 }
         # dump it to a JSON file
         return json.dumps(settings_to_download)
@@ -957,10 +910,32 @@ class HierarchicalSummaryMemory(ChatMemory):
         llm = OpenAILLM.from_json(uploaded_settings.get('summary_llm'))
         # load associated chat thread
         ct = ChatThread.from_json(uploaded_settings.get('chat_thread'))
+        # check what type of entity manager we have
+        entity_manager = uploaded_settings.get('entity_manager', None)
+        entity_list = uploaded_settings.get('entity_list', None)
+        if entity_list is None and entity_manager is None:
+            # no manager, just make a default one
+            entity_list = SimpleEntityManager(llm=llm)
+        elif entity_list is None and isinstance(entity_manager, str):
+            # new version with serialized JSON in 'entity_manager' field
+            entity_list = SimpleEntityManager.model_validate_json(entity_manager)
+        elif isinstance(entity_list, str) and entity_list.startswith("{"):
+            # JSON serialized object
+            entity_list = SimpleEntityManager.model_validate_json(entity_list)
+        elif isinstance(entity_list, str):
+            # raw string entity list, so we'll put it in a manager
+            el_obj = SimpleEntityManager(llm=llm)
+            el_obj.entity_list = entity_list
+            entity_list = el_obj
+            # get custom prompt, if any, stored alongside the string entity list
+            entity_list.prompt_entity_list = uploaded_settings.get('prompt_entity_list', entity_list.prompt_entity_list)
+        else:
+            print("WARNING: unexpected entity list format!\n\n" + str(entity_list))
         # create new memory object
         new_obj = cls(
             summary_llm=llm,
             chat_thread=ct,
+            entity_manager=entity_list,
             summary_prompt=uploaded_settings.get('summarization_prompt')
             )
         # load summary sizing parameters
@@ -972,9 +947,5 @@ class HierarchicalSummaryMemory(ChatMemory):
         new_obj.all_memory = uploaded_settings["all_memory"]
         # load archived summaries
         new_obj.archived_memory = uploaded_settings["archived_memory"]
-        # get entity list, if any
-        new_obj.entity_list = uploaded_settings.get('entity_list', None)
-        # get custom prompt, if any
-        new_obj.prompt_entity_list = uploaded_settings.get('prompt_entity_list', new_obj.prompt_entity_list)
         # return object
         return new_obj
