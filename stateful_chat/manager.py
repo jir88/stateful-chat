@@ -186,7 +186,7 @@ class HierarchicalSummaryMemory(ChatMemory):
         default=...,
         description="The LLM model to use when generating summaries. NOTE: make sure this model has the same allocated context window size as the main LLM!"
     )
-    entity_manager: SerializeAsAny[EntityManager] = Field(
+    entity_manager: SerializeAsAny[SimpleEntityManager] = Field(
         default=...,
         description="The entity manager object associated with this memory object."
     )
