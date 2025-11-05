@@ -379,7 +379,7 @@ class OpenAILLM(LLM):
     Interact with any OpenAI compatible backend.
     """
     # type name for deserialization
-    llm_class: ClassVar[str] = "OpenAILLM"
+    llm_class: str = "OpenAILLM"
 
     model: str = Field(..., description="Name of the LLM to use.")
     sampling_options: Optional[Dict[str, Any]] = Field(
