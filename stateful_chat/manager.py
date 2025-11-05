@@ -501,7 +501,12 @@ class HierarchicalSummaryManager(StatefulChatManager):
         Returns: a new HierarchicalSummaryManager object initialized from the JSON data
         """
         # load saved state
-        uploaded_settings = json.load(json_data)
+        if isinstance(json_data, str):
+            # load as string data
+            uploaded_settings = json.loads(json_data)
+        else:
+            # try to read as file-like
+            uploaded_settings = json.load(json_data)
         # if this is an old format, try to recover it
         # TODO: convert regular managers into hierarchical ones with no summaries?
         if uploaded_settings.get('chat_thread') is None:
