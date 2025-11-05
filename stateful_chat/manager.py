@@ -75,7 +75,7 @@ class StatefulChatManager:
         Returns: a string containing the JSON object
         """
         # define state to save
-        settings_to_download = {"llm": self.llm.to_json(),
+        settings_to_download = {"llm": self.llm.model_dump_json(),
                                 "chat_thread": self.chat_thread.to_json(),
                                 "chat_memory": self.chat_memory.to_json()
                                 }
@@ -508,7 +508,7 @@ class HierarchicalSummaryManager(StatefulChatManager):
             return StatefulChatManager._recover_old_json_format(uploaded_settings)
         # initialize LLM
         # TODO: use some dynamic loading to handle other classes
-        llm = OpenAILLM.from_json(uploaded_settings.get('llm'))
+        llm = OpenAILLM.model_validate_json(uploaded_settings.get('llm'))
         # load chat memory, which has required parameters for manager construction
         new_chat_memory = HierarchicalSummaryMemory.from_json(uploaded_settings.get('chat_memory'))
         # create new manager object
@@ -878,7 +878,7 @@ class HierarchicalSummaryMemory(ChatMemory):
         Returns: a string containing the JSON object
         """
         # define state to save
-        settings_to_download = {"summary_llm": self.summary_llm.to_json(),
+        settings_to_download = {"summary_llm": self.summary_llm.model_dump_json(indent=2),
                                 "chat_thread": self.chat_thread.to_json(),
                                 "entity_manager": self.entity_manager.model_dump_json(indent=2),
                                 "summarization_prompt": self.summarization_prompt,
@@ -907,7 +907,7 @@ class HierarchicalSummaryMemory(ChatMemory):
         else:
             uploaded_settings = json.load(json_data)
         # initialize LLM
-        llm = OpenAILLM.from_json(uploaded_settings.get('summary_llm'))
+        llm = OpenAILLM.model_validate_json(uploaded_settings.get('summary_llm'))
         # load associated chat thread
         ct = ChatThread.from_json(uploaded_settings.get('chat_thread'))
         # check what type of entity manager we have
