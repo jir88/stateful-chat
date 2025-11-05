@@ -163,23 +163,31 @@ class ChatMemory(ABC, BaseModel):
     def update_all_memory(self):
         raise NotImplementedError("Method not implemented!")
 
-class StatefulChatManager:
+class StatefulChatManager(ABC, BaseModel):
     """
     Top-level class managing all the moving parts of a stateful chat.
     """
 
-    def __init__(self, llm):
-        """
-        Create a new chat manager with a given large language model back-end.
+    llm: SerializeAsAny[LLM] = Field(
+        default=...,
+        description="The LLM instance to use for generating responses."
+    )
+    chat_thread: ChatThread = Field(
+        default=...,
+        description="The chat thread this instance will be managing."
+    )
+    chat_memory: SerializeAsAny[ChatMemory] = Field(
+        default=...,
+        description="Memory instance to track long-term memory of the chat thread. \
+            NOTE: ensure that this memory is managing the same object passed as chat_thread!"
+    )
 
-        Args:
-        llm (LLM): an LLM object to use
+    def model_post_init(self, context:Any) -> None:
         """
-        self.llm = llm
-        # create empty chat thread
-        self.chat_thread = ChatThread(str(uuid.uuid4()))
-        # create empty memory store
-        self.chat_memory = LLMSummaryMemory(llm=llm)
+        Called to confirm that the chat memory uses the same thread as chat_thread once the object is initialized.
+        """
+        if self.chat_thread is not self.chat_memory.chat_thread:
+            raise ValueError("Chat memory must use the same chat thread object passed to chat_thread!")
 
     def append_message(self, message):
         """
@@ -212,136 +220,14 @@ class StatefulChatManager:
         self.chat_thread.archive_messages(0, n_msgs)
 
     def export_thread(self):
-        pass
+        raise NotImplementedError("Not implemented!")
 
     def import_thread(self, messages):
         """
         Import a thread formatted as text. Existing messages are altered to
         reflect differences with the imported text.
         """
-        pass
-
-    def to_json(self):
-        """
-        Write this object out as a JSON object.
-
-        Returns: a string containing the JSON object
-        """
-        # define state to save
-        settings_to_download = {"llm": self.llm.model_dump_json(),
-                                "chat_thread": self.chat_thread.to_json(),
-                                "chat_memory": self.chat_memory.to_json()
-                                }
-        # dump it to a JSON file
-        return json.dumps(settings_to_download)
-
-    @classmethod
-    def from_json(cls, json_data):
-        """
-        Load saved session state from a JSON object.
-        Args:
-        json_data (str): JSON object or file containing session data
-
-        Returns: a new ChatSession object initialized from the JSON data
-        """
-        # load saved state
-        uploaded_settings = json.load(json_data)
-        # if this is an old format, try to recover it
-        if uploaded_settings.get('chat_thread') is None:
-            return StatefulChatManager._recover_old_json_format(uploaded_settings)
-        # initialize LLM
-        # TODO: use some dynamic loading to handle other classes
-        llm = OpenAILLM.from_json(uploaded_settings.get('llm'))
-        # create new memory object
-        new_obj = cls(llm=llm)
-        # load chat thread
-        new_obj.chat_thread = ChatThread.from_json(uploaded_settings.get('chat_thread'))
-        # load chat memory
-        new_obj.chat_memory = LLMSummaryMemory.from_json(uploaded_settings.get('chat_memory'))
-        # return object
-        return new_obj
-
-    @classmethod
-    def _recover_old_json_format(cls, uploaded_settings):
-        """
-        Upgrade an old JSON file to the current format.
-        """
-        # load instruct format
-        inst_fmt = uploaded_settings.get('instruct_format')
-        if inst_fmt is None:
-            # need to add default, which is Llama 3
-            inst_fmt = InstructFormat(name="Llama 3 Chat",
-                                      message_template="<|start_header_id|>{role}<|end_header_id|>\n\n{content}",
-                                      begin_of_text="",
-                                      end_of_turn="<|eot_id|>",
-                                      continue_template="<|start_header_id|>{role}<|end_header_id|>\n\n")
-        else:
-            # parse existing format
-            inst_fmt = json.loads(inst_fmt)
-            inst_fmt = InstructFormat(name=inst_fmt['name'],
-                                      message_template=inst_fmt['message_template'],
-                                      # old versions didn't have BoT
-                                      begin_of_text="",
-                                      end_of_turn=inst_fmt['end_of_turn'],
-                                      continue_template=inst_fmt['continue_template'])
-        
-        # initialize LLM
-        llm = OpenAILLM(model=uploaded_settings["llm"],
-                        # default sampling options
-                        sampling_options=None,
-                        instruct_fmt=inst_fmt
-                       )
-        # create new chat manager
-        new_manager = cls(llm=llm)
-        
-        # set up chat thread
-        new_manager.chat_thread = ChatThread(session_id=uploaded_settings["session_id"])
-        new_manager.chat_thread.system_prompt = uploaded_settings["system_prompt"]
-        new_manager.chat_thread.messages = uploaded_settings["messages"]
-        new_manager.chat_thread.user_role = uploaded_settings["user_role"]
-        new_manager.chat_thread.ai_role = uploaded_settings["ai_role"]
-        new_manager.chat_thread.archived_messages = uploaded_settings["archived_messages"]
-        # add archived message IDs if they are missing
-        if len(new_manager.chat_thread.archived_messages) > 0 and new_manager.chat_thread.archived_messages[0].get('id') is None:
-            print("Fixing archived message IDs.")
-            for i in range(0, len(new_manager.chat_thread.archived_messages)):
-                new_manager.chat_thread.archived_messages[i]['id'] = i
-        # also add current message IDs if those are missing
-        if len(new_manager.chat_thread.messages) > 0 and new_manager.chat_thread.messages[0].get('id') is None:
-            print("Fixing current message IDs.")
-            for i in range(0, len(new_manager.chat_thread.messages)):
-                new_manager.chat_thread.messages[i]['id'] = i + len(new_manager.chat_thread.archived_messages)
-        
-        # set up session memory using the main LLM
-        # use a copy, though, so we can use different settings for them in the future
-        new_manager.chat_memory = LLMSummaryMemory(llm=copy.deepcopy(llm))
-        # import message summaries
-        new_manager.chat_memory.message_summaries = uploaded_settings["message_summaries"]
-        # if summaries are stored as strings, update to dicts with indices
-        if len(new_manager.chat_memory.message_summaries) > 0 and str(new_manager.chat_memory.message_summaries[0].__class__) != "<class 'dict'>":
-            print(str(new_manager.chat_memory.message_summaries[0].__class__))
-            for i in range(0, len(new_manager.chat_memory.message_summaries)):
-                new_manager.chat_memory.message_summaries[i] = { 
-                    "id": i, 
-                    "content": new_manager.chat_memory.message_summaries[i]
-                }
-        # add full summary
-        new_manager.chat_memory.full_summary = uploaded_settings["full_summary"]
-        # load entity list
-        new_manager.chat_memory.entity_list = uploaded_settings["entity_list"]
-        # memory prompts
-        new_manager.chat_memory.init_sys_prompt = "You are an expert summarizer. You will summarize the following messages. You will also use the messages to update a running summary of the whole previous exchange. The following messages are a conversation between {ai} and {user}.\n\nContext:\n"
-        new_manager.chat_memory.prompt_msg_summary = uploaded_settings.get("prompt_msg_summary")
-        if new_manager.chat_memory.prompt_msg_summary is None:
-            new_manager.chat_memory.prompt_msg_summary = "Concisely summarize these messages. Include all relevant details. Reference context from prior summaries where relevant, but focus on the most recent messages. Match the tense and perspective of the story."
-        new_manager.chat_memory.prompt_full_summary = uploaded_settings.get("prompt_full_summary")
-        if new_manager.chat_memory.prompt_full_summary is None:
-            new_manager.chat_memory.prompt_full_summary = "Concisely summarize all messages so far. Base this summary on the previous full summary. Include all relevant details. Mention any unresolved discussion topics."
-        new_manager.chat_memory.prompt_entity_list = uploaded_settings.get("prompt_entity_list")
-        if new_manager.chat_memory.prompt_entity_list is None:
-            new_manager.chat_memory.prompt_entity_list = "Provide a list of all entities mentioned thus far and a brief description of each. For people, include a brief description of their personalities. Write more detailed descriptions for more important entities."
-        # return object
-        return new_manager
+        raise NotImplementedError("Not implemented!")
 
     def compile_system_prompt(self):
         """
