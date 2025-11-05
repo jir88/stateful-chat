@@ -58,7 +58,9 @@ def load_instruct_formats():
     # load each file into a list
     fmt_obj = []
     for ff in fmt_files:
-        inst_fmt = scl.InstructFormat.from_json(open(ff, mode='r'))
+        with open(ff, mode='r') as f:
+            inst_data = f.read()
+        inst_fmt = scl.InstructFormat.model_validate_json(inst_data)
         fmt_obj.append(inst_fmt)
     return fmt_obj
 
