@@ -2,7 +2,7 @@ import copy
 import uuid
 import json
 import re
-from typing import List, Optional, Dict, Any, Iterator, AnyStr
+from typing import List, Optional, Dict, Any, Iterator, AnyStr, ClassVar
 from pydantic import BaseModel, Field, root_validator, SerializeAsAny
 from abc import ABC
 
@@ -20,7 +20,7 @@ class ChatThread(BaseModel):
     """
 
     # pulls role names out of a string representation of a thread
-    role_regex: re.Pattern[AnyStr] = re.compile(r"{{(.+?)}}")
+    role_regex: ClassVar[re.Pattern[AnyStr]] = re.compile(r"{{(.+?)}}")
 
     session_id: str = Field(..., description="The unique identifier of this chat thread.")
     system_prompt: Optional[str] = Field(None, description="An optional system prompt for this chat thread.")
@@ -859,7 +859,7 @@ class HierarchicalSummaryMemory(ChatMemory):
             result += "{{L" + str(mem['level']) + "@" + str(mem['msg_idx']) + "}}\n" + mem['content'] + "\n"
         return result
     
-    memory_regex = re.compile(r"{{L(\d+)@(\d+)}}")
+    memory_regex: ClassVar[re.Pattern[AnyStr]] = re.compile(r"{{L(\d+)@(\d+)}}")
 
     def import_readable(self, formatted_messages:str):
         """
