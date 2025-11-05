@@ -168,147 +168,6 @@ class ChatMemory(ABC, BaseModel):
     def update_all_memory(self):
         raise NotImplementedError("Method not implemented!")
 
-class StatefulChatManager(ABC, BaseModel):
-    """
-    Top-level class managing all the moving parts of a stateful chat.
-    """
-
-    llm: SerializeAsAny[LLM] = Field(
-        default=...,
-        description="The LLM instance to use for generating responses."
-    )
-    chat_memory: SerializeAsAny[ChatMemory] = Field(
-        default=...,
-        description="Memory instance to track long-term memory of the chat thread. \
-            NOTE: ensure that this memory is managing the same object passed as chat_thread!"
-    )
-
-    def append_message(self, message):
-        """
-        Append message.
-
-        Args:
-        message (dict): Dict containing at least 'role' and 'content' keys
-        """
-        ct = self.chat_memory.chat_thread
-        # if missing, set ID to be the message index
-        if not "id" in message:
-            message['id'] = len(ct.messages) + len(ct.archived_messages)
-        # add to the active chat thread
-        ct.messages.append(message)
-        # Needs updating: embed regenerated AI response
-        #st.session_state.chat_session.embed_text(st.session_state.chat_session.messages[-1], "message")
-
-    def messages_to_memory(self, n_msgs):
-        """
-        Remove a number of the oldest messages from context and commit them
-        to memory.
-
-        Args:
-        n_msgs (int): Number of oldest messages
-        """
-        ct = self.chat_memory.chat_thread
-        # pull messages
-        old_msgs = ct.messages[0:n_msgs]
-        # add to memory. Send system prompt or the model goes insane
-        self.chat_memory.add_messages(old_msgs, context=self.compile_system_prompt())
-        # archive messages in thread
-        ct.archive_messages(0, n_msgs)
-
-    def export_thread(self):
-        raise NotImplementedError("Not implemented!")
-
-    def import_thread(self, messages):
-        """
-        Import a thread formatted as text. Existing messages are altered to
-        reflect differences with the imported text.
-        """
-        raise NotImplementedError("Not implemented!")
-
-    def compile_system_prompt(self):
-        """
-        Combine raw prompt, the most recent message summary, and the entity list
-        into a full system prompt.
-
-        TODO: the memory stuff should probably be delegated to the memory class.
-        """
-        ct = self.chat_memory.chat_thread
-        # start with the system prompt for the current chat thread, if any
-        full_sys_prompt = ""
-        if ct.system_prompt is not None:
-            full_sys_prompt += ct.system_prompt.strip()
-        # add top-level summary from memory
-        if self.chat_memory.full_summary is not None:
-            full_sys_prompt += "\n\nComplete summary of all previous messages:\n" + self.chat_memory.full_summary
-        # add entity list, if any
-        if self.chat_memory.entity_list is not None:
-            full_sys_prompt += "\n\nEntitites mentioned previously:\n" + self.chat_memory.entity_list
-        # add latest message summary, if any
-        if len(self.chat_memory.message_summaries) > 0:
-            full_sys_prompt += "\n\nSummary of recent previous messages:\n" + self.chat_memory.message_summaries[-1]['content']
-        return full_sys_prompt
-    
-    def get_response(self, stream=True):
-        """
-        Generate an AI response starting with the end of the current thread.
-        Uses summary messages to ensure we don't overflow the context window.
-
-        Args:
-        stream (bool): whether to stream the response or not
-
-        Returns: a generator if streaming or the response text if not streaming
-        """
-        sys_prompt = self.compile_system_prompt().strip()
-        all_msgs = [{ 'role': "system", 'content': sys_prompt }]
-        # add in-context messages after sys prompt
-        all_msgs.extend(self.chat_memory.chat_thread.messages)
-        # generate response using current thread's AI role
-        return self.llm.generate_instruct(messages=all_msgs,
-                                          respond=True,
-                                          response_role=self.chat_memory.chat_thread.ai_role,
-                                          stream=stream
-                                          )
-
-    def continue_response(self, stream=True):
-        """
-        Continue generating from the end of the most recent message.
-        """
-        # make the system prompt
-        sys_prompt = self.compile_system_prompt().strip()
-        all_msgs = [{ 'role': "system", 'content': sys_prompt }]
-        # add in-context messages after sys prompt
-        all_msgs.extend(self.chat_memory.chat_thread.messages)
-        # continue generating from end of last message
-        return self.llm.generate_instruct(messages=all_msgs,
-                                          respond=False,
-                                          stream=stream
-                                          )
-
-class HierarchicalSummaryManager(StatefulChatManager):
-    """
-    Custom chat manager that compresses long chats into the context window using 
-    heirarchical summaries of older messages, similar to the method used by
-    perchance.ai.
-    """
-
-    def compile_system_prompt(self):
-        """
-        Combine raw prompt and summaries into a full system prompt.
-        """
-        ct = self.chat_memory.chat_thread
-        # start with the system prompt for the current chat thread, if any
-        full_sys_prompt = ""
-        if ct.system_prompt is not None:
-            full_sys_prompt += ct.system_prompt.strip()
-        # add entity list, if any
-        if self.chat_memory.entity_list is not None and len(self.chat_memory.entity_list) > 0:
-            full_sys_prompt += "\n\nEntities appearing in previous messages:\n" + self.chat_memory.entity_list
-        # add top-level summary from memory
-        if len(self.chat_memory.all_memory) > 0:
-            mems = [m['content'] for m in self.chat_memory.all_memory]
-            full_sys_prompt += "\n\nSummary of all previous messages:\n" + "\n".join(mems)
-        return full_sys_prompt
-
 class HierarchicalSummaryMemory(ChatMemory):
     """
     Manages chat memory using a similar mechanism to the one used by perchance.ai.
@@ -651,3 +510,149 @@ class HierarchicalSummaryMemory(ChatMemory):
             }
             parsed_messages.append(msg_dict)
         self.all_memory = parsed_messages
+
+class StatefulChatManager(ABC, BaseModel):
+    """
+    Top-level class managing all the moving parts of a stateful chat.
+    """
+
+    llm: SerializeAsAny[LLM] = Field(
+        default=...,
+        description="The LLM instance to use for generating responses."
+    )
+    chat_memory: SerializeAsAny[ChatMemory] = Field(
+        default=...,
+        description="Memory instance to track long-term memory of the chat thread. \
+            NOTE: ensure that this memory is managing the same object passed as chat_thread!"
+    )
+
+    def append_message(self, message):
+        """
+        Append message.
+
+        Args:
+        message (dict): Dict containing at least 'role' and 'content' keys
+        """
+        ct = self.chat_memory.chat_thread
+        # if missing, set ID to be the message index
+        if not "id" in message:
+            message['id'] = len(ct.messages) + len(ct.archived_messages)
+        # add to the active chat thread
+        ct.messages.append(message)
+        # Needs updating: embed regenerated AI response
+        #st.session_state.chat_session.embed_text(st.session_state.chat_session.messages[-1], "message")
+
+    def messages_to_memory(self, n_msgs):
+        """
+        Remove a number of the oldest messages from context and commit them
+        to memory.
+
+        Args:
+        n_msgs (int): Number of oldest messages
+        """
+        ct = self.chat_memory.chat_thread
+        # pull messages
+        old_msgs = ct.messages[0:n_msgs]
+        # add to memory. Send system prompt or the model goes insane
+        self.chat_memory.add_messages(old_msgs, context=self.compile_system_prompt())
+        # archive messages in thread
+        ct.archive_messages(0, n_msgs)
+
+    def export_thread(self):
+        raise NotImplementedError("Not implemented!")
+
+    def import_thread(self, messages):
+        """
+        Import a thread formatted as text. Existing messages are altered to
+        reflect differences with the imported text.
+        """
+        raise NotImplementedError("Not implemented!")
+
+    def compile_system_prompt(self):
+        """
+        Combine raw prompt, the most recent message summary, and the entity list
+        into a full system prompt.
+
+        TODO: the memory stuff should probably be delegated to the memory class.
+        """
+        ct = self.chat_memory.chat_thread
+        # start with the system prompt for the current chat thread, if any
+        full_sys_prompt = ""
+        if ct.system_prompt is not None:
+            full_sys_prompt += ct.system_prompt.strip()
+        # add top-level summary from memory
+        if self.chat_memory.full_summary is not None:
+            full_sys_prompt += "\n\nComplete summary of all previous messages:\n" + self.chat_memory.full_summary
+        # add entity list, if any
+        if self.chat_memory.entity_list is not None:
+            full_sys_prompt += "\n\nEntitites mentioned previously:\n" + self.chat_memory.entity_list
+        # add latest message summary, if any
+        if len(self.chat_memory.message_summaries) > 0:
+            full_sys_prompt += "\n\nSummary of recent previous messages:\n" + self.chat_memory.message_summaries[-1]['content']
+        return full_sys_prompt
+    
+    def get_response(self, stream=True):
+        """
+        Generate an AI response starting with the end of the current thread.
+        Uses summary messages to ensure we don't overflow the context window.
+
+        Args:
+        stream (bool): whether to stream the response or not
+
+        Returns: a generator if streaming or the response text if not streaming
+        """
+        sys_prompt = self.compile_system_prompt().strip()
+        all_msgs = [{ 'role': "system", 'content': sys_prompt }]
+        # add in-context messages after sys prompt
+        all_msgs.extend(self.chat_memory.chat_thread.messages)
+        # generate response using current thread's AI role
+        return self.llm.generate_instruct(messages=all_msgs,
+                                          respond=True,
+                                          response_role=self.chat_memory.chat_thread.ai_role,
+                                          stream=stream
+                                          )
+
+    def continue_response(self, stream=True):
+        """
+        Continue generating from the end of the most recent message.
+        """
+        # make the system prompt
+        sys_prompt = self.compile_system_prompt().strip()
+        all_msgs = [{ 'role': "system", 'content': sys_prompt }]
+        # add in-context messages after sys prompt
+        all_msgs.extend(self.chat_memory.chat_thread.messages)
+        # continue generating from end of last message
+        return self.llm.generate_instruct(messages=all_msgs,
+                                          respond=False,
+                                          stream=stream
+                                          )
+
+class HierarchicalSummaryManager(StatefulChatManager):
+    """
+    Custom chat manager that compresses long chats into the context window using 
+    heirarchical summaries of older messages, similar to the method used by
+    perchance.ai.
+    """
+
+    chat_memory: SerializeAsAny[HierarchicalSummaryMemory] = Field(
+        default=...,
+        description="Hierarchical memory instance to track long-term memory of the chat thread."
+    )
+
+    def compile_system_prompt(self):
+        """
+        Combine raw prompt and summaries into a full system prompt.
+        """
+        ct = self.chat_memory.chat_thread
+        # start with the system prompt for the current chat thread, if any
+        full_sys_prompt = ""
+        if ct.system_prompt is not None:
+            full_sys_prompt += ct.system_prompt.strip()
+        # add entity list, if any
+        if self.chat_memory.entity_list is not None and len(self.chat_memory.entity_list) > 0:
+            full_sys_prompt += "\n\nEntities appearing in previous messages:\n" + self.chat_memory.entity_list
+        # add top-level summary from memory
+        if len(self.chat_memory.all_memory) > 0:
+            mems = [m['content'] for m in self.chat_memory.all_memory]
+            full_sys_prompt += "\n\nSummary of all previous messages:\n" + "\n".join(mems)
+        return full_sys_prompt
