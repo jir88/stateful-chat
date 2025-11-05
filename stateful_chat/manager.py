@@ -135,6 +135,34 @@ class ChatThread(BaseModel):
     #     # return object
     #     return new_obj
 
+class ChatMemory(ABC, BaseModel):
+    """
+    Abstract class for various methods of helping LLMs 'remember' information beyond
+    their context lengths.
+    """
+
+    class Config:
+        arbitrary_types_allowed = True
+
+    def add_documents(self, docs):
+        """
+        Add a set of documents to memory. How these are added will vary by implementation.
+
+        Args:
+        docs (list[dict]): a list of dicts, where each dict has the document ('content' key)
+            plus any other useful metadata.
+        """
+        raise NotImplementedError("Method not implemented!")
+
+    def update_memory(self, mem_id, mem_content):
+        raise NotImplementedError("Method not implemented!")
+
+    def query_memory(self, query_text, n_results=3):
+        raise NotImplementedError("Method not implemented!")
+
+    def update_all_memory(self):
+        raise NotImplementedError("Method not implemented!")
+
 class StatefulChatManager:
     """
     Top-level class managing all the moving parts of a stateful chat.
@@ -366,31 +394,6 @@ class StatefulChatManager:
                                           respond=False,
                                           stream=stream
                                           )
-
-class ChatMemory:
-    """
-    Abstract class for various methods of helping LLMs 'remember' information beyond
-    their context lengths.
-    """
-
-    def add_documents(self, docs):
-        """
-        Add a set of documents to memory. How these are added will vary by implementation.
-
-        Args:
-        docs (list[dict]): a list of dicts, where each dict has the document ('content' key)
-            plus any other useful metadata.
-        """
-        raise NotImplementedError("Method not implemented!")
-
-    def update_memory(self, mem_id, mem_content):
-        raise NotImplementedError("Method not implemented!")
-
-    def query_memory(self, query_text, n_results=3):
-        raise NotImplementedError("Method not implemented!")
-
-    def update_all_memory(self):
-        raise NotImplementedError("Method not implemented!")
 
 class HierarchicalSummaryManager(StatefulChatManager):
     """
