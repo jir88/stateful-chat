@@ -553,59 +553,62 @@ class HierarchicalSummaryMemory(ChatMemory):
     and the chat message index where the last summarized message is located.
     """
 
-    def __init__(self,
-        summary_llm:LLM,
-        chat_thread:ChatThread,
-        entity_manager:EntityManager,
-        summary_prompt:str = None,
-        prop_ctx:float=0.8,
-        prop_summary:float=0.5,
-        n_levels:int=3,
-        n_tok_summarize:int=1024):
-        """
-        Construct a new memory object.
-
-        Args:
-        summary_llm (LLM): the LLM model to use when generating summaries. NOTE: make
-            sure this model has the same allocated context window size as the main LLM!
-        chat_thread (ChatThread): the chat thread associated with this memory object
-        summary_prompt (str): Optional custom summarization prompt. To include prior
-            context in the prompt, use placeholder {context}. If no custom prompt
-            provided, uses a default prompt instead.
-        prop_ctx (float): the proportion of the total context window that summaries
-            plus un-summarized messages may use up before triggering a higher-level
-            summary.
-        prop_summary (float): The proportion of a message/summary level that can
-            be occupied by messages/summaries of higher level. Each summary
-            level is allocated prop_summary of the context alloted to the next higher
-            level (total context window for original thread messages).
-        n_levels (int): the maximum number of summary levels to use
-        n_tok_summarize (int): the target number of tokens to summarize in one pass.
-            If this corresponds to less than one message, that whole message will be
-            summarized.
-        """
-        self.summary_llm = summary_llm
-        self.chat_thread = chat_thread
-        self.entity_manager = entity_manager
-        self.prop_ctx = prop_ctx
-        self.prop_summary = prop_summary
-        self.n_levels = n_levels
-        self.n_tok_summarize = n_tok_summarize
-        
-        self.summarization_prompt = """You are summarizing a long series of messages into a concise but accurate summary. You will be given any relevant prior context and the user will provide the messages to be summarized. You must only summarize the content of the messages themselves, not the prior context. Make sure to include all important details.
+    summary_llm: SerializeAsAny[LLM] = Field(
+        default=...,
+        description="The LLM model to use when generating summaries. NOTE: make sure this model has the same allocated context window size as the main LLM!"
+    )
+    chat_thread: ChatThread = Field(
+        default=...,
+        description="The chat thread associated with this memory object."
+    )
+    entity_manager: SerializeAsAny[EntityManager] = Field(
+        default=...,
+        description="The entity manager object associated with this memory object."
+    )
+    summary_prompt: str = Field(
+        default="""You are summarizing a long series of messages into a concise but accurate summary. You will be given any relevant prior context and the user will provide the messages to be summarized. You must only summarize the content of the messages themselves, not the prior context. Make sure to include all important details.
 
         Prior context:
         {context}
 
-        Now the user will provide you with the messages to be summarized. Respond only with a single-paragraph summary, no additional commentary."""
-        if summary_prompt is not None:
-            self.summarization_prompt = summary_prompt
-        # summaries are stored as a list of dicts with summary level, the actual
-        # messages (or lower-level summaries) that were summarized, and the index
-        # of the final summarized message in the full chat thread
-        self.all_memory = []
-        # summaries which have been collapsed into the top-level summary go here
-        self.archived_memory = []
+        Now the user will provide you with the messages to be summarized. Respond only with a single-paragraph summary, no additional commentary.""",
+        description="Optional custom summarization prompt. To include prior \
+            context in the prompt, use placeholder {context}. If no custom prompt \
+            provided, uses a default prompt instead."
+    )
+    prop_ctx: float = Field(
+        default=0.8,
+        description="The proportion of the total context window that summaries \
+            plus un-summarized messages may use up before triggering a higher-level \
+            summary."
+    )
+    prop_summary: float = Field(
+        default=0.5,
+        description="The proportion of a message/summary level that can \
+            be occupied by messages/summaries of higher level. Each summary \
+            level is allocated prop_summary of the context alloted to the next higher \
+            level (total context window for original thread messages)."
+    )
+    n_levels: int = Field(
+        default=3,
+        description="The maximum number of summary levels to use."
+    )
+    n_tok_summarize: int = Field(
+        default=1024,
+        description="The target number of tokens to summarize in one pass. \
+            If this corresponds to less than one message, that whole message will be \
+            summarized."
+    )
+    all_memory: List[Dict[str, Any]] = Field(
+        default=[],
+        description="Summaries stored as a list of dicts containing summary level, the actual \
+            messages (or lower-level summaries) that were summarized, and the index \
+            of the final summarized message in the full chat thread"
+    )
+    archived_memory: List[Dict[str, Any]] = Field(
+        default=[],
+        description="Summaries which have been collapsed into the top-level summary."
+    )
 
     def update_all_memory(self):
         """
@@ -746,7 +749,7 @@ class HierarchicalSummaryMemory(ChatMemory):
         # construct system prompt
         sys_prompt = {
             'role': 'system',
-            'content': self.summarization_prompt.format(context="\n\n".join([ps['content'] for ps in prior_summaries]))
+            'content': self.summary_prompt.format(context="\n\n".join([ps['content'] for ps in prior_summaries]))
         }
         user_prompt = {
             'role': 'user',
@@ -882,82 +885,3 @@ class HierarchicalSummaryMemory(ChatMemory):
             }
             parsed_messages.append(msg_dict)
         self.all_memory = parsed_messages
-
-    def to_json(self):
-        """
-        Write this object out as a JSON object.
-
-        Returns: a string containing the JSON object
-        """
-        # define state to save
-        settings_to_download = {"summary_llm": self.summary_llm.model_dump_json(indent=2),
-                                "chat_thread": self.chat_thread.to_json(),
-                                "entity_manager": self.entity_manager.model_dump_json(indent=2),
-                                "summarization_prompt": self.summarization_prompt,
-                                "prop_ctx": self.prop_ctx,
-                                "prop_summary": self.prop_summary,
-                                "n_levels": self.n_levels,
-                                "n_tok_summarize": self.n_tok_summarize,
-                                "all_memory": self.all_memory,
-                                "archived_memory": self.archived_memory,
-                                }
-        # dump it to a JSON file
-        return json.dumps(settings_to_download)
-
-    @classmethod
-    def from_json(cls, json_data):
-        """
-        Load saved session state from a JSON object.
-        Args:
-        json_data (str): JSON object or file containing session data
-
-        Returns: a new ChatSession object initialized from the JSON data
-        """
-        # load saved state
-        if type(json_data) == str:
-            uploaded_settings = json.loads(json_data)
-        else:
-            uploaded_settings = json.load(json_data)
-        # initialize LLM
-        llm = OpenAILLM.model_validate_json(uploaded_settings.get('summary_llm'))
-        # load associated chat thread
-        ct = ChatThread.from_json(uploaded_settings.get('chat_thread'))
-        # check what type of entity manager we have
-        entity_manager = uploaded_settings.get('entity_manager', None)
-        entity_list = uploaded_settings.get('entity_list', None)
-        if entity_list is None and entity_manager is None:
-            # no manager, just make a default one
-            entity_list = SimpleEntityManager(llm=llm)
-        elif entity_list is None and isinstance(entity_manager, str):
-            # new version with serialized JSON in 'entity_manager' field
-            entity_list = SimpleEntityManager.model_validate_json(entity_manager)
-        elif isinstance(entity_list, str) and entity_list.startswith("{"):
-            # JSON serialized object
-            entity_list = SimpleEntityManager.model_validate_json(entity_list)
-        elif isinstance(entity_list, str):
-            # raw string entity list, so we'll put it in a manager
-            el_obj = SimpleEntityManager(llm=llm)
-            el_obj.entity_list = entity_list
-            entity_list = el_obj
-            # get custom prompt, if any, stored alongside the string entity list
-            entity_list.prompt_entity_list = uploaded_settings.get('prompt_entity_list', entity_list.prompt_entity_list)
-        else:
-            print("WARNING: unexpected entity list format!\n\n" + str(entity_list))
-        # create new memory object
-        new_obj = cls(
-            summary_llm=llm,
-            chat_thread=ct,
-            entity_manager=entity_list,
-            summary_prompt=uploaded_settings.get('summarization_prompt')
-            )
-        # load summary sizing parameters
-        new_obj.prop_ctx = uploaded_settings["prop_ctx"]
-        new_obj.prop_summary = uploaded_settings["prop_summary"]
-        new_obj.n_levels = uploaded_settings["n_levels"]
-        new_obj.n_tok_summarize = uploaded_settings["n_tok_summarize"]
-        # load active summaries
-        new_obj.all_memory = uploaded_settings["all_memory"]
-        # load archived summaries
-        new_obj.archived_memory = uploaded_settings["archived_memory"]
-        # return object
-        return new_obj
