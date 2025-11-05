@@ -2,13 +2,138 @@ import copy
 import uuid
 import json
 import re
-from typing import List, Optional, Dict, Any, Iterator
+from typing import List, Optional, Dict, Any, Iterator, AnyStr
 from pydantic import BaseModel, Field, root_validator, SerializeAsAny
 from abc import ABC
 
 
 from stateful_chat.llm import OpenAILLM,InstructFormat,LLM
 from stateful_chat.entity import Entity,EntityManager,SimpleEntityManager
+
+class ChatThread(BaseModel):
+    """
+    A single chat thread between a user and an LLM.
+    
+    Attributes:
+    session_id (str): The unique identifier of the chat thread.
+    messages (list): A list of messages sent in the chat thread.
+    """
+
+    # pulls role names out of a string representation of a thread
+    role_regex: re.Pattern[AnyStr] = re.compile(r"{{(.+?)}}")
+
+    session_id: str = Field(..., description="The unique identifier of this chat thread.")
+    system_prompt: Optional[str] = Field(None, description="An optional system prompt for this chat thread.")
+    messages: List[Dict[str, Any]] = Field(
+        default=[],
+        description="A list of dicts representing the messages in this thread."
+    )
+    archived_messages: List[Dict[str, Any]] = Field(
+        default=[],
+        description="A list of dicts representing archived past messages which are no longer in the context window."
+    )
+    user_role: str = Field(
+        default="user", 
+        description="The name of the human/user role in this chat. Defaults to 'user'."
+    )
+    ai_role: str = Field(
+        default="assistant", 
+        description="The name of the AI/assistant role in this chat. Defaults to 'assistant'."
+    )
+
+    def archive_messages(self, start_idx, stop_idx):
+        """
+        Move some messages from the main message thread to the
+        archived messages list.
+
+        Args:
+        start_idx (int): index of first message to archive (inclusive)
+        end_idx (int): index of last message to archive (exclusive)
+        """
+        self.archived_messages.extend(self.messages[start_idx:stop_idx])
+        del self.messages[start_idx:stop_idx]
+
+    def format_readable(self):
+        """
+        Convert all messages in this thread into a human-readable and editable
+        format. Message roles are displayed in curly brackets: {{role}} with
+        message text following. Leading and trailing whitespace are ignored.
+        """
+        result = ""
+        for i in range(0, len(self.messages)):
+            result += "{{" + self.messages[i]['role'] + "}}\n" + self.messages[i]['content'] + "\n"
+        return result
+
+    def import_readable(self, formatted_messages:str):
+        """
+        Parse messages exported by format_readable and use them to replace any
+        existing messages in this chat session.
+
+        Args:
+        formatted_messages (str): The formatted messages to be parsed.
+        """
+        # splitting with capturing groups returns the roles too
+        msg_parts = self.role_regex.split(formatted_messages)
+        # drop first item, which is blank for some reason
+        msg_parts = msg_parts[1:]
+        
+        # strip out extra whitespace and format
+        # should probably pre-allocate this...
+        parsed_messages = []
+        for i in range(0, len(msg_parts), 2):
+            msg_dict = {
+                "id": len(self.archived_messages) + i/2,
+                "role": msg_parts[i],
+                "content": str.strip(msg_parts[i + 1])
+            }
+            parsed_messages.append(msg_dict)
+        self.messages = parsed_messages
+
+    # def to_json(self):
+    #     """
+    #     Write this object out as a JSON object.
+
+    #     Returns: a string containing the JSON object
+    #     """
+    #     # define state to save
+    #     settings_to_download = {"session_id": self.session_id,
+    #                             "system_prompt": self.system_prompt,
+    #                             "messages": self.messages,
+    #                             "user_role": self.user_role,
+    #                             "ai_role": self.ai_role,
+    #                             "archived_messages": self.archived_messages
+    #                             }
+    #     # dump it to a JSON file
+    #     return json.dumps(settings_to_download)
+
+    # @classmethod
+    # def from_json(cls, json_data):
+    #     """
+    #     Load saved session state from a JSON object.
+    #     Args:
+    #     json_data (str): JSON object or file containing session data
+
+    #     Returns: a new ChatSession object initialized from the JSON data
+    #     """
+    #     # load saved state
+    #     if type(json_data) == str:
+    #         uploaded_settings = json.loads(json_data)
+    #     else:
+    #         uploaded_settings = json.load(json_data)
+    #     # create new thread object
+    #     new_obj = cls(session_id=uploaded_settings.get('session_id'))
+    #     # load system prompt
+    #     new_obj.system_prompt = uploaded_settings.get('system_prompt')
+    #     # load messages
+    #     new_obj.messages = uploaded_settings.get('messages')
+    #     # load user role
+    #     new_obj.user_role = uploaded_settings["user_role"]
+    #     # load AI role
+    #     new_obj.ai_role = uploaded_settings["ai_role"]
+    #     # load archived messages
+    #     new_obj.archived_messages = uploaded_settings.get('archived_messages')
+    #     # return object
+    #     return new_obj
 
 class StatefulChatManager:
     """
@@ -241,127 +366,6 @@ class StatefulChatManager:
                                           respond=False,
                                           stream=stream
                                           )
-
-class ChatThread:
-    """
-    A single chat thread between a user and an LLM.
-    
-    Attributes:
-    session_id (str): The unique identifier of the chat thread.
-    messages (list): A list of messages sent in the chat thread.
-    """
-
-    # pulls role names out of a string representation of a thread
-    role_regex = re.compile(r"{{(.+?)}}")
-
-    def __init__(self, session_id):
-        """
-        Initializes the chat session with a given session ID.
-
-        Args:
-        session_id (str): The unique identifier of the chat session.
-        """
-        self.session_id = session_id
-        self.system_prompt = None
-        self.messages = []
-        self.user_role = "user"
-        self.ai_role = "assistant"
-        # past messages, no longer in context/working memory
-        self.archived_messages = []
-
-    def archive_messages(self, start_idx, stop_idx):
-        """
-        Move some messages from the main message thread to the
-        archived messages list.
-
-        Args:
-        start_idx (int): index of first message to archive (inclusive)
-        end_idx (int): index of last message to archive (exclusive)
-        """
-        self.archived_messages.extend(self.messages[start_idx:stop_idx])
-        del self.messages[start_idx:stop_idx]
-
-    def format_readable(self):
-        """
-        Convert all messages in this thread into a human-readable and editable
-        format. Message roles are displayed in curly brackets: {{role}} with
-        message text following. Leading and trailing whitespace are ignored.
-        """
-        result = ""
-        for i in range(0, len(self.messages)):
-            result += "{{" + self.messages[i]['role'] + "}}\n" + self.messages[i]['content'] + "\n"
-        return result
-
-    def import_readable(self, formatted_messages:str):
-        """
-        Parse messages exported by format_readable and use them to replace any
-        existing messages in this chat session.
-
-        Args:
-        formatted_messages (str): The formatted messages to be parsed.
-        """
-        # splitting with capturing groups returns the roles too
-        msg_parts = self.role_regex.split(formatted_messages)
-        # drop first item, which is blank for some reason
-        msg_parts = msg_parts[1:]
-        
-        # strip out extra whitespace and format
-        # should probably pre-allocate this...
-        parsed_messages = []
-        for i in range(0, len(msg_parts), 2):
-            msg_dict = {
-                "id": len(self.archived_messages) + i/2,
-                "role": msg_parts[i],
-                "content": str.strip(msg_parts[i + 1])
-            }
-            parsed_messages.append(msg_dict)
-        self.messages = parsed_messages
-
-    def to_json(self):
-        """
-        Write this object out as a JSON object.
-
-        Returns: a string containing the JSON object
-        """
-        # define state to save
-        settings_to_download = {"session_id": self.session_id,
-                                "system_prompt": self.system_prompt,
-                                "messages": self.messages,
-                                "user_role": self.user_role,
-                                "ai_role": self.ai_role,
-                                "archived_messages": self.archived_messages
-                                }
-        # dump it to a JSON file
-        return json.dumps(settings_to_download)
-
-    @classmethod
-    def from_json(cls, json_data):
-        """
-        Load saved session state from a JSON object.
-        Args:
-        json_data (str): JSON object or file containing session data
-
-        Returns: a new ChatSession object initialized from the JSON data
-        """
-        # load saved state
-        if type(json_data) == str:
-            uploaded_settings = json.loads(json_data)
-        else:
-            uploaded_settings = json.load(json_data)
-        # create new thread object
-        new_obj = cls(session_id=uploaded_settings.get('session_id'))
-        # load system prompt
-        new_obj.system_prompt = uploaded_settings.get('system_prompt')
-        # load messages
-        new_obj.messages = uploaded_settings.get('messages')
-        # load user role
-        new_obj.user_role = uploaded_settings["user_role"]
-        # load AI role
-        new_obj.ai_role = uploaded_settings["ai_role"]
-        # load archived messages
-        new_obj.archived_messages = uploaded_settings.get('archived_messages')
-        # return object
-        return new_obj
 
 class ChatMemory:
     """
