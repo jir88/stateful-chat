@@ -145,7 +145,7 @@ class ChatMemory(ABC, BaseModel):
         default=...,
         description="The chat thread associated with this memory object."
     )
-    
+
     class Config:
         arbitrary_types_allowed = True
 
@@ -177,22 +177,11 @@ class StatefulChatManager(ABC, BaseModel):
         default=...,
         description="The LLM instance to use for generating responses."
     )
-    chat_thread: ChatThread = Field(
-        default=...,
-        description="The chat thread this instance will be managing."
-    )
     chat_memory: SerializeAsAny[ChatMemory] = Field(
         default=...,
         description="Memory instance to track long-term memory of the chat thread. \
             NOTE: ensure that this memory is managing the same object passed as chat_thread!"
     )
-
-    def model_post_init(self, context:Any) -> None:
-        """
-        Called to confirm that the chat memory uses the same thread as chat_thread once the object is initialized.
-        """
-        if self.chat_thread is not self.chat_memory.chat_thread:
-            raise ValueError("Chat memory must use the same chat thread object passed to chat_thread!")
 
     def append_message(self, message):
         """
@@ -201,11 +190,12 @@ class StatefulChatManager(ABC, BaseModel):
         Args:
         message (dict): Dict containing at least 'role' and 'content' keys
         """
+        ct = self.chat_memory.chat_thread
         # if missing, set ID to be the message index
         if not "id" in message:
-            message['id'] = len(self.chat_thread.messages) + len(self.chat_thread.archived_messages)
+            message['id'] = len(ct.messages) + len(ct.archived_messages)
         # add to the active chat thread
-        self.chat_thread.messages.append(message)
+        ct.messages.append(message)
         # Needs updating: embed regenerated AI response
         #st.session_state.chat_session.embed_text(st.session_state.chat_session.messages[-1], "message")
 
@@ -217,12 +207,13 @@ class StatefulChatManager(ABC, BaseModel):
         Args:
         n_msgs (int): Number of oldest messages
         """
+        ct = self.chat_memory.chat_thread
         # pull messages
-        old_msgs = self.chat_thread.messages[0:n_msgs]
+        old_msgs = ct.messages[0:n_msgs]
         # add to memory. Send system prompt or the model goes insane
         self.chat_memory.add_messages(old_msgs, context=self.compile_system_prompt())
         # archive messages in thread
-        self.chat_thread.archive_messages(0, n_msgs)
+        ct.archive_messages(0, n_msgs)
 
     def export_thread(self):
         raise NotImplementedError("Not implemented!")
@@ -241,10 +232,11 @@ class StatefulChatManager(ABC, BaseModel):
 
         TODO: the memory stuff should probably be delegated to the memory class.
         """
+        ct = self.chat_memory.chat_thread
         # start with the system prompt for the current chat thread, if any
         full_sys_prompt = ""
-        if self.chat_thread.system_prompt is not None:
-            full_sys_prompt += self.chat_thread.system_prompt.strip()
+        if ct.system_prompt is not None:
+            full_sys_prompt += ct.system_prompt.strip()
         # add top-level summary from memory
         if self.chat_memory.full_summary is not None:
             full_sys_prompt += "\n\nComplete summary of all previous messages:\n" + self.chat_memory.full_summary
@@ -269,11 +261,11 @@ class StatefulChatManager(ABC, BaseModel):
         sys_prompt = self.compile_system_prompt().strip()
         all_msgs = [{ 'role': "system", 'content': sys_prompt }]
         # add in-context messages after sys prompt
-        all_msgs.extend(self.chat_thread.messages)
+        all_msgs.extend(self.chat_memory.chat_thread.messages)
         # generate response using current thread's AI role
         return self.llm.generate_instruct(messages=all_msgs,
                                           respond=True,
-                                          response_role=self.chat_thread.ai_role,
+                                          response_role=self.chat_memory.chat_thread.ai_role,
                                           stream=stream
                                           )
 
@@ -285,7 +277,7 @@ class StatefulChatManager(ABC, BaseModel):
         sys_prompt = self.compile_system_prompt().strip()
         all_msgs = [{ 'role': "system", 'content': sys_prompt }]
         # add in-context messages after sys prompt
-        all_msgs.extend(self.chat_thread.messages)
+        all_msgs.extend(self.chat_memory.chat_thread.messages)
         # continue generating from end of last message
         return self.llm.generate_instruct(messages=all_msgs,
                                           respond=False,
@@ -303,10 +295,11 @@ class HierarchicalSummaryManager(StatefulChatManager):
         """
         Combine raw prompt and summaries into a full system prompt.
         """
+        ct = self.chat_memory.chat_thread
         # start with the system prompt for the current chat thread, if any
         full_sys_prompt = ""
-        if self.chat_thread.system_prompt is not None:
-            full_sys_prompt += self.chat_thread.system_prompt.strip()
+        if ct.system_prompt is not None:
+            full_sys_prompt += ct.system_prompt.strip()
         # add entity list, if any
         if self.chat_memory.entity_list is not None and len(self.chat_memory.entity_list) > 0:
             full_sys_prompt += "\n\nEntities appearing in previous messages:\n" + self.chat_memory.entity_list
