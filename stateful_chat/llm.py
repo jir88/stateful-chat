@@ -78,6 +78,28 @@ class LLM(BaseModel, ABC):
 
     llm_class:str
 
+    model: str = Field(..., description="Name of the LLM to use.")
+    sampling_options: Optional[Dict[str, Any]] = Field(
+        default={
+            "num_predict": 1024,
+            "num_ctx": 8192,
+            "temperature": 1.0,
+            "min_p": 0.1,
+            "keep_alive": "15m"
+        },
+        description="Dictionary of OpenAI-compatible sampling parameters to use."
+    )
+    instruct_format: Optional[InstructFormat] = Field(
+        default=InstructFormat(
+            name="Basic Chat",
+            begin_of_text = "",
+            message_template="{role}:\n{content}",
+            end_of_turn="\n\n",
+            continue_template="{role}:\n"
+            ),
+        description="The instruct format this LLM expects."
+    )
+    
     class Config:
         arbitrary_types_allowed = True
 
@@ -381,27 +403,6 @@ class OpenAILLM(LLM):
     # type name for deserialization
     llm_class: str = "OpenAILLM"
 
-    model: str = Field(..., description="Name of the LLM to use.")
-    sampling_options: Optional[Dict[str, Any]] = Field(
-        default={
-            "num_predict": 1024,
-            "num_ctx": 8192,
-            "temperature": 1.0,
-            "min_p": 0.1,
-            "keep_alive": "15m"
-        },
-        description="Dictionary of OpenAI-compatible sampling parameters to use."
-    )
-    instruct_format: Optional[InstructFormat] = Field(
-        default=InstructFormat(
-            name="Basic Chat",
-            begin_of_text = "",
-            message_template="{role}:\n{content}",
-            end_of_turn="\n\n",
-            continue_template="{role}:\n"
-            ),
-        description="The instruct format this LLM expects."
-    )
     api_key: str = Field(
         default="sk_fake",
         description="The API key to use; can use an arbitrary string for local endpoints that do not require a key."
