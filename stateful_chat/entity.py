@@ -2,7 +2,7 @@ from abc import ABC
 from typing import List, Optional, Dict, Any
 from pydantic import BaseModel,Field,SerializeAsAny,root_validator
 
-from .llm import LLM
+from .llm import LLM,LLMType
 
 class Entity:
     """A single entity mentioned in a chat thread."""
@@ -56,7 +56,10 @@ class SimpleEntityManager(EntityManager):
     block of text.
     """
 
-    llm: SerializeAsAny[LLM] = Field(..., description="LLM instance used to generate the entity list")
+    llm: SerializeAsAny[LLMType] = Field(
+        default=...,
+        discriminator='llm_class',
+        description="LLM instance used to generate the entity list")
     entity_list: Optional[str] = Field(None, description="Current entity list as a free-form list in a single string")
     prompt_entity_list: str = Field(
         default=(

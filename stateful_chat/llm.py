@@ -4,7 +4,7 @@ import json
 import openai
 import requests
 from abc import ABC
-from typing import Union,ClassVar,Dict,Optional,Any
+from typing import Union,ClassVar,Dict,Optional,Any,Literal
 from pydantic import BaseModel,TypeAdapter,Field
 
 # boilerplate to allow automatically casting serialized LLMs to the proper class
@@ -76,7 +76,7 @@ class LLM(BaseModel, ABC):
     Generic large language model interface. Extend this class to implement specific LLM providers.
     """
 
-    llm_class:str
+    llm_class:Literal['base'] = "base"
 
     model: str = Field(..., description="Name of the LLM to use.")
     sampling_options: Optional[Dict[str, Any]] = Field(
@@ -99,7 +99,7 @@ class LLM(BaseModel, ABC):
             ),
         description="The instruct format this LLM expects."
     )
-    
+
     class Config:
         arbitrary_types_allowed = True
 
@@ -401,7 +401,7 @@ class OpenAILLM(LLM):
     Interact with any OpenAI compatible backend.
     """
     # type name for deserialization
-    llm_class: str = "OpenAILLM"
+    llm_class:Literal['OpenAILLM'] = "OpenAILLM"
 
     api_key: str = Field(
         default="sk_fake",
@@ -548,6 +548,9 @@ class OpenAILLM(LLM):
             print(f"Error: {response.status_code} - {response.text}")
             return None
 
+# a union type covering the possible LLM types
+# you can discriminate it by using Field(discriminator='llm_class')
+LLMType = Union[LLM, OpenAILLM]
 
 if __name__ == "__main__":
     # print(str(llm_class_registry))

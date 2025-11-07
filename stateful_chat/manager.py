@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field, root_validator, SerializeAsAny
 from abc import ABC
 
 
-from stateful_chat.llm import OpenAILLM,InstructFormat,LLM
+from stateful_chat.llm import OpenAILLM,InstructFormat,LLM,LLMType
 from stateful_chat.entity import Entity,EntityManager,SimpleEntityManager
 
 class ChatThread(BaseModel):
@@ -182,8 +182,9 @@ class HierarchicalSummaryMemory(ChatMemory):
     and the chat message index where the last summarized message is located.
     """
 
-    summary_llm: SerializeAsAny[LLM] = Field(
+    summary_llm: SerializeAsAny[LLMType] = Field(
         default=...,
+        discriminator='llm_class',
         description="The LLM model to use when generating summaries. NOTE: make sure this model has the same allocated context window size as the main LLM!"
     )
     entity_manager: SerializeAsAny[SimpleEntityManager] = Field(
@@ -516,8 +517,9 @@ class StatefulChatManager(ABC, BaseModel):
     Top-level class managing all the moving parts of a stateful chat.
     """
 
-    llm: SerializeAsAny[LLM] = Field(
+    llm: SerializeAsAny[LLMType] = Field(
         default=...,
+        discriminator='llm_class',
         description="The LLM instance to use for generating responses."
     )
     chat_memory: SerializeAsAny[ChatMemory] = Field(
