@@ -163,3 +163,4 @@ cython_debug/
 .chroma/
 perchance-ai-rpg.html
 perchance-ai-rpg.js
+.vscode/launch.json

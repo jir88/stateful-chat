@@ -2,241 +2,15 @@ import copy
 import uuid
 import json
 import re
-from stateful_chat.llm import OpenAILLM,InstructFormat,LLM
+from typing import List, Optional, Dict, Any, Iterator, AnyStr, ClassVar
+from pydantic import BaseModel, Field, root_validator, SerializeAsAny
+from abc import ABC
 
-class StatefulChatManager:
-    """
-    Top-level class managing all the moving parts of a stateful chat.
-    """
 
-    def __init__(self, llm):
-        """
-        Create a new chat manager with a given large language model back-end.
+from stateful_chat.llm import OpenAILLM,InstructFormat,LLM,LLMType
+from stateful_chat.entity import Entity,EntityManager,SimpleEntityManager
 
-        Args:
-        llm (LLM): an LLM object to use
-        """
-        self.llm = llm
-        # create empty chat thread
-        self.chat_thread = ChatThread(str(uuid.uuid4()))
-        # create empty memory store
-        self.chat_memory = LLMSummaryMemory(llm=llm)
-
-    def append_message(self, message):
-        """
-        Append message.
-
-        Args:
-        message (dict): Dict containing at least 'role' and 'content' keys
-        """
-        # if missing, set ID to be the message index
-        if not "id" in message:
-            message['id'] = len(self.chat_thread.messages) + len(self.chat_thread.archived_messages)
-        # add to the active chat thread
-        self.chat_thread.messages.append(message)
-        # Needs updating: embed regenerated AI response
-        #st.session_state.chat_session.embed_text(st.session_state.chat_session.messages[-1], "message")
-
-    def messages_to_memory(self, n_msgs):
-        """
-        Remove a number of the oldest messages from context and commit them
-        to memory.
-
-        Args:
-        n_msgs (int): Number of oldest messages
-        """
-        # pull messages
-        old_msgs = self.chat_thread.messages[0:n_msgs]
-        # add to memory. Send system prompt or the model goes insane
-        self.chat_memory.add_messages(old_msgs, context=self.compile_system_prompt())
-        # archive messages in thread
-        self.chat_thread.archive_messages(0, n_msgs)
-
-    def export_thread(self):
-        pass
-
-    def import_thread(self, messages):
-        """
-        Import a thread formatted as text. Existing messages are altered to
-        reflect differences with the imported text.
-        """
-        pass
-
-    def to_json(self):
-        """
-        Write this object out as a JSON object.
-
-        Returns: a string containing the JSON object
-        """
-        # define state to save
-        settings_to_download = {"llm": self.llm.to_json(),
-                                "chat_thread": self.chat_thread.to_json(),
-                                "chat_memory": self.chat_memory.to_json()
-                                }
-        # dump it to a JSON file
-        return json.dumps(settings_to_download)
-
-    @classmethod
-    def from_json(cls, json_data):
-        """
-        Load saved session state from a JSON object.
-        Args:
-        json_data (str): JSON object or file containing session data
-
-        Returns: a new ChatSession object initialized from the JSON data
-        """
-        # load saved state
-        uploaded_settings = json.load(json_data)
-        # if this is an old format, try to recover it
-        if uploaded_settings.get('chat_thread') is None:
-            return StatefulChatManager._recover_old_json_format(uploaded_settings)
-        # initialize LLM
-        # TODO: use some dynamic loading to handle other classes
-        llm = OpenAILLM.from_json(uploaded_settings.get('llm'))
-        # create new memory object
-        new_obj = cls(llm=llm)
-        # load chat thread
-        new_obj.chat_thread = ChatThread.from_json(uploaded_settings.get('chat_thread'))
-        # load chat memory
-        new_obj.chat_memory = LLMSummaryMemory.from_json(uploaded_settings.get('chat_memory'))
-        # return object
-        return new_obj
-
-    @classmethod
-    def _recover_old_json_format(cls, uploaded_settings):
-        """
-        Upgrade an old JSON file to the current format.
-        """
-        # load instruct format
-        inst_fmt = uploaded_settings.get('instruct_format')
-        if inst_fmt is None:
-            # need to add default, which is Llama 3
-            inst_fmt = InstructFormat(name="Llama 3 Chat",
-                                      message_template="<|start_header_id|>{role}<|end_header_id|>\n\n{content}",
-                                      begin_of_text="",
-                                      end_of_turn="<|eot_id|>",
-                                      continue_template="<|start_header_id|>{role}<|end_header_id|>\n\n")
-        else:
-            # parse existing format
-            inst_fmt = json.loads(inst_fmt)
-            inst_fmt = InstructFormat(name=inst_fmt['name'],
-                                      message_template=inst_fmt['message_template'],
-                                      # old versions didn't have BoT
-                                      begin_of_text="",
-                                      end_of_turn=inst_fmt['end_of_turn'],
-                                      continue_template=inst_fmt['continue_template'])
-        
-        # initialize LLM
-        llm = OpenAILLM(model=uploaded_settings["llm"],
-                        # default sampling options
-                        sampling_options=None,
-                        instruct_fmt=inst_fmt
-                       )
-        # create new chat manager
-        new_manager = cls(llm=llm)
-        
-        # set up chat thread
-        new_manager.chat_thread = ChatThread(session_id=uploaded_settings["session_id"])
-        new_manager.chat_thread.system_prompt = uploaded_settings["system_prompt"]
-        new_manager.chat_thread.messages = uploaded_settings["messages"]
-        new_manager.chat_thread.user_role = uploaded_settings["user_role"]
-        new_manager.chat_thread.ai_role = uploaded_settings["ai_role"]
-        new_manager.chat_thread.archived_messages = uploaded_settings["archived_messages"]
-        # add archived message IDs if they are missing
-        if len(new_manager.chat_thread.archived_messages) > 0 and new_manager.chat_thread.archived_messages[0].get('id') is None:
-            print("Fixing archived message IDs.")
-            for i in range(0, len(new_manager.chat_thread.archived_messages)):
-                new_manager.chat_thread.archived_messages[i]['id'] = i
-        # also add current message IDs if those are missing
-        if len(new_manager.chat_thread.messages) > 0 and new_manager.chat_thread.messages[0].get('id') is None:
-            print("Fixing current message IDs.")
-            for i in range(0, len(new_manager.chat_thread.messages)):
-                new_manager.chat_thread.messages[i]['id'] = i + len(new_manager.chat_thread.archived_messages)
-        
-        # set up session memory using the main LLM
-        # use a copy, though, so we can use different settings for them in the future
-        new_manager.chat_memory = LLMSummaryMemory(llm=copy.deepcopy(llm))
-        # import message summaries
-        new_manager.chat_memory.message_summaries = uploaded_settings["message_summaries"]
-        # if summaries are stored as strings, update to dicts with indices
-        if len(new_manager.chat_memory.message_summaries) > 0 and str(new_manager.chat_memory.message_summaries[0].__class__) != "<class 'dict'>":
-            print(str(new_manager.chat_memory.message_summaries[0].__class__))
-            for i in range(0, len(new_manager.chat_memory.message_summaries)):
-                new_manager.chat_memory.message_summaries[i] = { 
-                    "id": i, 
-                    "content": new_manager.chat_memory.message_summaries[i]
-                }
-        # add full summary
-        new_manager.chat_memory.full_summary = uploaded_settings["full_summary"]
-        # load entity list
-        new_manager.chat_memory.entity_list = uploaded_settings["entity_list"]
-        # memory prompts
-        new_manager.chat_memory.init_sys_prompt = "You are an expert summarizer. You will summarize the following messages. You will also use the messages to update a running summary of the whole previous exchange. The following messages are a conversation between {ai} and {user}.\n\nContext:\n"
-        new_manager.chat_memory.prompt_msg_summary = uploaded_settings.get("prompt_msg_summary")
-        if new_manager.chat_memory.prompt_msg_summary is None:
-            new_manager.chat_memory.prompt_msg_summary = "Concisely summarize these messages. Include all relevant details. Reference context from prior summaries where relevant, but focus on the most recent messages. Match the tense and perspective of the story."
-        new_manager.chat_memory.prompt_full_summary = uploaded_settings.get("prompt_full_summary")
-        if new_manager.chat_memory.prompt_full_summary is None:
-            new_manager.chat_memory.prompt_full_summary = "Concisely summarize all messages so far. Base this summary on the previous full summary. Include all relevant details. Mention any unresolved discussion topics."
-        new_manager.chat_memory.prompt_entity_list = uploaded_settings.get("prompt_entity_list")
-        if new_manager.chat_memory.prompt_entity_list is None:
-            new_manager.chat_memory.prompt_entity_list = "Provide a list of all entities mentioned thus far and a brief description of each. For people, include a brief description of their personalities. Write more detailed descriptions for more important entities."
-        # return object
-        return new_manager
-
-    def compile_system_prompt(self):
-        """
-        Combine raw prompt, the most recent message summary, and the entity list
-        into a full system prompt.
-
-        TODO: the memory stuff should probably be delegated to the memory class.
-        """
-        # start with the system prompt for the current chat thread, if any
-        full_sys_prompt = ""
-        if self.chat_thread.system_prompt is not None:
-            full_sys_prompt += self.chat_thread.system_prompt.strip()
-        # add top-level summary from memory
-        if self.chat_memory.full_summary is not None:
-            full_sys_prompt += "\n\nComplete summary of all previous messages:\n" + self.chat_memory.full_summary
-        # add entity list, if any
-        if self.chat_memory.entity_list is not None:
-            full_sys_prompt += "\n\nEntitites mentioned previously:\n" + self.chat_memory.entity_list
-        # add latest message summary, if any
-        if len(self.chat_memory.message_summaries) > 0:
-            full_sys_prompt += "\n\nSummary of recent previous messages:\n" + self.chat_memory.message_summaries[-1]['content']
-        return full_sys_prompt
-    
-    def get_response(self, stream=True):
-        # make the system prompt
-        #TODO: should probably delegate a bunch of this formatting to the memory object
-        sys_prompt = self.compile_system_prompt().strip()
-        all_msgs = [{ 'role': "system", 'content': sys_prompt }]
-        # add in-context messages after sys prompt
-        all_msgs.extend(self.chat_thread.messages)
-        # generate response using current thread's AI role
-        return self.llm.generate_instruct(messages=all_msgs,
-                                          respond=True,
-                                          response_role=self.chat_thread.ai_role,
-                                          stream=stream
-                                          )
-
-    def continue_response(self, stream=True):
-        """
-        Continue generating from the end of the most recent message.
-        """
-        # make the system prompt
-        #TODO: should probably delegate a bunch of this formatting to the memory object
-        sys_prompt = self.compile_system_prompt().strip()
-        all_msgs = [{ 'role': "system", 'content': sys_prompt }]
-        # add in-context messages after sys prompt
-        all_msgs.extend(self.chat_thread.messages)
-        # continue generating from end of last message
-        return self.llm.generate_instruct(messages=all_msgs,
-                                          respond=False,
-                                          stream=stream
-                                          )
-
-class ChatThread:
+class ChatThread(BaseModel):
     """
     A single chat thread between a user and an LLM.
     
@@ -246,22 +20,26 @@ class ChatThread:
     """
 
     # pulls role names out of a string representation of a thread
-    role_regex = re.compile(r"{{(.+?)}}")
+    role_regex: ClassVar[re.Pattern[AnyStr]] = re.compile(r"{{(.+?)}}")
 
-    def __init__(self, session_id):
-        """
-        Initializes the chat session with a given session ID.
-
-        Args:
-        session_id (str): The unique identifier of the chat session.
-        """
-        self.session_id = session_id
-        self.system_prompt = None
-        self.messages = []
-        self.user_role = "user"
-        self.ai_role = "assistant"
-        # past messages, no longer in context/working memory
-        self.archived_messages = []
+    session_id: str = Field(..., description="The unique identifier of this chat thread.")
+    system_prompt: Optional[str] = Field(None, description="An optional system prompt for this chat thread.")
+    messages: List[Dict[str, Any]] = Field(
+        default=[],
+        description="A list of dicts representing the messages in this thread."
+    )
+    archived_messages: List[Dict[str, Any]] = Field(
+        default=[],
+        description="A list of dicts representing archived past messages which are no longer in the context window."
+    )
+    user_role: str = Field(
+        default="user", 
+        description="The name of the human/user role in this chat. Defaults to 'user'."
+    )
+    ai_role: str = Field(
+        default="assistant", 
+        description="The name of the AI/assistant role in this chat. Defaults to 'assistant'."
+    )
 
     def archive_messages(self, start_idx, stop_idx):
         """
@@ -311,57 +89,65 @@ class ChatThread:
             parsed_messages.append(msg_dict)
         self.messages = parsed_messages
 
-    def to_json(self):
-        """
-        Write this object out as a JSON object.
+    # def to_json(self):
+    #     """
+    #     Write this object out as a JSON object.
 
-        Returns: a string containing the JSON object
-        """
-        # define state to save
-        settings_to_download = {"session_id": self.session_id,
-                                "system_prompt": self.system_prompt,
-                                "messages": self.messages,
-                                "user_role": self.user_role,
-                                "ai_role": self.ai_role,
-                                "archived_messages": self.archived_messages
-                                }
-        # dump it to a JSON file
-        return json.dumps(settings_to_download)
+    #     Returns: a string containing the JSON object
+    #     """
+    #     # define state to save
+    #     settings_to_download = {"session_id": self.session_id,
+    #                             "system_prompt": self.system_prompt,
+    #                             "messages": self.messages,
+    #                             "user_role": self.user_role,
+    #                             "ai_role": self.ai_role,
+    #                             "archived_messages": self.archived_messages
+    #                             }
+    #     # dump it to a JSON file
+    #     return json.dumps(settings_to_download)
 
-    @classmethod
-    def from_json(cls, json_data):
-        """
-        Load saved session state from a JSON object.
-        Args:
-        json_data (str): JSON object or file containing session data
+    # @classmethod
+    # def from_json(cls, json_data):
+    #     """
+    #     Load saved session state from a JSON object.
+    #     Args:
+    #     json_data (str): JSON object or file containing session data
 
-        Returns: a new ChatSession object initialized from the JSON data
-        """
-        # load saved state
-        if type(json_data) == str:
-            uploaded_settings = json.loads(json_data)
-        else:
-            uploaded_settings = json.load(json_data)
-        # create new thread object
-        new_obj = cls(session_id=uploaded_settings.get('session_id'))
-        # load system prompt
-        new_obj.system_prompt = uploaded_settings.get('system_prompt')
-        # load messages
-        new_obj.messages = uploaded_settings.get('messages')
-        # load user role
-        new_obj.user_role = uploaded_settings["user_role"]
-        # load AI role
-        new_obj.ai_role = uploaded_settings["ai_role"]
-        # load archived messages
-        new_obj.archived_messages = uploaded_settings.get('archived_messages')
-        # return object
-        return new_obj
+    #     Returns: a new ChatSession object initialized from the JSON data
+    #     """
+    #     # load saved state
+    #     if type(json_data) == str:
+    #         uploaded_settings = json.loads(json_data)
+    #     else:
+    #         uploaded_settings = json.load(json_data)
+    #     # create new thread object
+    #     new_obj = cls(session_id=uploaded_settings.get('session_id'))
+    #     # load system prompt
+    #     new_obj.system_prompt = uploaded_settings.get('system_prompt')
+    #     # load messages
+    #     new_obj.messages = uploaded_settings.get('messages')
+    #     # load user role
+    #     new_obj.user_role = uploaded_settings["user_role"]
+    #     # load AI role
+    #     new_obj.ai_role = uploaded_settings["ai_role"]
+    #     # load archived messages
+    #     new_obj.archived_messages = uploaded_settings.get('archived_messages')
+    #     # return object
+    #     return new_obj
 
-class ChatMemory:
+class ChatMemory(ABC, BaseModel):
     """
     Abstract class for various methods of helping LLMs 'remember' information beyond
     their context lengths.
     """
+
+    chat_thread: ChatThread = Field(
+        default=...,
+        description="The chat thread associated with this memory object."
+    )
+
+    class Config:
+        arbitrary_types_allowed = True
 
     def add_documents(self, docs):
         """
@@ -382,142 +168,6 @@ class ChatMemory:
     def update_all_memory(self):
         raise NotImplementedError("Method not implemented!")
 
-class HierarchicalSummaryManager(StatefulChatManager):
-    """
-    Custom chat manager that compresses long chats into the context window using 
-    heirarchical summaries of older messages, similar to the method used by
-    perchance.ai.
-    """
-
-    def __init__(
-        self, llm:LLM, summary_llm:LLM=None,
-        prop_ctx:float=0.8, prop_summary:float=0.5,
-        n_levels:int=3, n_tok_summarize:int=1024):
-        """
-        Create a new chat manager with a given large language model back-end.
-
-        Args:
-        llm (LLM): an LLM object to use
-        summary_llm (LLM): the LLM model to use when generating summaries. NOTE: make
-            sure this model has the same allocated context window size as the main LLM!
-        chat_thread (ChatThread): the chat thread associated with this memory object
-        prop_ctx (float): the proportion of the total context window that summaries
-            plus un-summarized messages may use up before triggering a higher-level
-            summary.
-        prop_summary (float): The proportion of a message/summary level that can
-            be occupied by messages/summaries of higher level. Each summary
-            level is allocated prop_summary of the context alloted to the next higher
-            level (total context window for original thread messages).
-        n_levels (int): the maximum number of summary levels to use
-        n_tok_summarize (int): the target number of tokens to summarize in one pass.
-            If this corresponds to less than one message, that whole message will be
-            summarized.
-        """
-        self.llm = llm
-        # if no summary LLM specified, use main one
-        if summary_llm is None:
-            summary_llm = llm
-        # create empty chat thread
-        self.chat_thread = ChatThread(str(uuid.uuid4()))
-        # create empty memory store
-        self.chat_memory = HierarchicalSummaryMemory(
-            summary_llm=summary_llm,
-            chat_thread=self.chat_thread,
-            prop_ctx=prop_ctx,
-            prop_summary=prop_summary,
-            n_levels=n_levels,
-            n_tok_summarize=n_tok_summarize
-            )
-    
-    def get_response(self, stream=True):
-        """
-        Generate an AI response starting with the end of the current thread.
-        Uses summary messages to ensure we don't overflow the context window.
-
-        Args:
-        stream (bool): whether to stream the response or not
-
-        Returns: a generator if streaming or the response text if not streaming
-        """
-        sys_prompt = self.compile_system_prompt().strip()
-        all_msgs = [{ 'role': "system", 'content': sys_prompt }]
-        # add in-context messages after sys prompt
-        all_msgs.extend(self.chat_thread.messages)
-        # generate response using current thread's AI role
-        return self.llm.generate_instruct(messages=all_msgs,
-                                          respond=True,
-                                          response_role=self.chat_thread.ai_role,
-                                          stream=stream
-                                          )
-
-    def continue_response(self, stream=True):
-        """
-        Continue generating from the end of the most recent message.
-        """
-        # make the system prompt
-        sys_prompt = self.compile_system_prompt().strip()
-        all_msgs = [{ 'role': "system", 'content': sys_prompt }]
-        # add in-context messages after sys prompt
-        all_msgs.extend(self.chat_thread.messages)
-        # continue generating from end of last message
-        return self.llm.generate_instruct(messages=all_msgs,
-                                          respond=False,
-                                          stream=stream
-                                          )
-
-    def compile_system_prompt(self):
-        """
-        Combine raw prompt and summaries into a full system prompt.
-        """
-        # start with the system prompt for the current chat thread, if any
-        full_sys_prompt = ""
-        if self.chat_thread.system_prompt is not None:
-            full_sys_prompt += self.chat_thread.system_prompt.strip()
-        # add entity list, if any
-        if self.chat_memory.entity_list is not None and len(self.chat_memory.entity_list) > 0:
-            full_sys_prompt += "\n\nEntities appearing in previous messages:\n" + self.chat_memory.entity_list
-        # add top-level summary from memory
-        if len(self.chat_memory.all_memory) > 0:
-            mems = [m['content'] for m in self.chat_memory.all_memory]
-            full_sys_prompt += "\n\nSummary of all previous messages:\n" + "\n".join(mems)
-        return full_sys_prompt
-
-    @classmethod
-    def from_json(cls, json_data):
-        """
-        Load saved session state from a JSON object.
-        Args:
-        json_data (str): JSON object or file containing session data
-
-        Returns: a new HierarchicalSummaryManager object initialized from the JSON data
-        """
-        # load saved state
-        uploaded_settings = json.load(json_data)
-        # if this is an old format, try to recover it
-        # TODO: convert regular managers into hierarchical ones with no summaries?
-        if uploaded_settings.get('chat_thread') is None:
-            return StatefulChatManager._recover_old_json_format(uploaded_settings)
-        # initialize LLM
-        # TODO: use some dynamic loading to handle other classes
-        llm = OpenAILLM.from_json(uploaded_settings.get('llm'))
-        # load chat memory, which has required parameters for manager construction
-        new_chat_memory = HierarchicalSummaryMemory.from_json(uploaded_settings.get('chat_memory'))
-        # create new manager object
-        new_obj = cls(
-            llm=llm,
-            summary_llm=new_chat_memory.summary_llm,
-            prop_ctx=new_chat_memory.prop_ctx,
-            prop_summary=new_chat_memory.prop_summary,
-            n_levels=new_chat_memory.n_levels,
-            n_tok_summarize=new_chat_memory.n_tok_summarize
-            )
-        # assign chat thread from memory
-        new_obj.chat_thread = new_chat_memory.chat_thread
-        # load chat memory
-        new_obj.chat_memory = new_chat_memory
-        # return object
-        return new_obj
-
 class HierarchicalSummaryMemory(ChatMemory):
     """
     Manages chat memory using a similar mechanism to the one used by perchance.ai.
@@ -532,67 +182,59 @@ class HierarchicalSummaryMemory(ChatMemory):
     and the chat message index where the last summarized message is located.
     """
 
-    def __init__(
-        self, summary_llm:LLM, chat_thread:ChatThread,
-        summary_prompt:str = None,
-        prop_ctx:float=0.8,
-        prop_summary:float=0.5,
-        n_levels:int=3,
-        n_tok_summarize:int=1024):
-        """
-        Construct a new memory object.
-
-        Args:
-        summary_llm (LLM): the LLM model to use when generating summaries. NOTE: make
-            sure this model has the same allocated context window size as the main LLM!
-        chat_thread (ChatThread): the chat thread associated with this memory object
-        summary_prompt (str): Optional custom summarization prompt. To include prior
-            context in the prompt, use placeholder {context}. If no custom prompt
-            provided, uses a default prompt instead.
-        prop_ctx (float): the proportion of the total context window that summaries
-            plus un-summarized messages may use up before triggering a higher-level
-            summary.
-        prop_summary (float): The proportion of a message/summary level that can
-            be occupied by messages/summaries of higher level. Each summary
-            level is allocated prop_summary of the context alloted to the next higher
-            level (total context window for original thread messages).
-        n_levels (int): the maximum number of summary levels to use
-        n_tok_summarize (int): the target number of tokens to summarize in one pass.
-            If this corresponds to less than one message, that whole message will be
-            summarized.
-        """
-        self.summary_llm = summary_llm
-        self.chat_thread = chat_thread
-        self.prop_ctx = prop_ctx
-        self.prop_summary = prop_summary
-        self.n_levels = n_levels
-        self.n_tok_summarize = n_tok_summarize
-        
-        self.summarization_prompt = """You are summarizing a long series of messages into a concise but accurate summary. You will be given any relevant prior context and the user will provide the messages to be summarized. You must only summarize the content of the messages themselves, not the prior context. Make sure to include all important details.
+    summary_llm: SerializeAsAny[LLMType] = Field(
+        default=...,
+        discriminator='llm_class',
+        description="The LLM model to use when generating summaries. NOTE: make sure this model has the same allocated context window size as the main LLM!"
+    )
+    entity_manager: SerializeAsAny[SimpleEntityManager] = Field(
+        default=...,
+        description="The entity manager object associated with this memory object."
+    )
+    summary_prompt: str = Field(
+        default="""You are summarizing a long series of messages into a concise but accurate summary. You will be given any relevant prior context and the user will provide the messages to be summarized. You must only summarize the content of the messages themselves, not the prior context. Make sure to include all important details.
 
         Prior context:
         {context}
 
-        Now the user will provide you with the messages to be summarized. Respond only with a single-paragraph summary, no additional commentary."""
-        if summary_prompt is not None:
-            self.summarization_prompt = summary_prompt
-        # summaries are stored as a list of dicts with summary level, the actual
-        # messages (or lower-level summaries) that were summarized, and the index
-        # of the final summarized message in the full chat thread
-        self.all_memory = []
-        # summaries which have been collapsed into the top-level summary go here
-        self.archived_memory = []
-        # free-form text description of important entities (people/places/things) in the memories
-        self.entity_list = None
-        # and the default prompt to generate it
-        self.prompt_entity_list = """You are creating a list of all important entities mentioned thus far and a brief description of each. You will be given any relevant prior context and the user will provide the messages from which you should extract or update entities. For people, include a brief description of their personalities and appearance. Write more detailed descriptions for more important entities.
-        Prior context:
-        {context}
-
-        Existing list of entities to be updated:
-        {entities}
-
-        Now the user will provide you with the messages from which you should extract entity information. Respond only with a list of significant entities and a brief description of each entity, no additional commentary."""
+        Now the user will provide you with the messages to be summarized. Respond only with a single-paragraph summary, no additional commentary.""",
+        description="Optional custom summarization prompt. To include prior \
+            context in the prompt, use placeholder {context}. If no custom prompt \
+            provided, uses a default prompt instead."
+    )
+    prop_ctx: float = Field(
+        default=0.8,
+        description="The proportion of the total context window that summaries \
+            plus un-summarized messages may use up before triggering a higher-level \
+            summary."
+    )
+    prop_summary: float = Field(
+        default=0.5,
+        description="The proportion of a message/summary level that can \
+            be occupied by messages/summaries of higher level. Each summary \
+            level is allocated prop_summary of the context alloted to the next higher \
+            level (total context window for original thread messages)."
+    )
+    n_levels: int = Field(
+        default=3,
+        description="The maximum number of summary levels to use."
+    )
+    n_tok_summarize: int = Field(
+        default=1024,
+        description="The target number of tokens to summarize in one pass. \
+            If this corresponds to less than one message, that whole message will be \
+            summarized."
+    )
+    all_memory: List[Dict[str, Any]] = Field(
+        default=[],
+        description="Summaries stored as a list of dicts containing summary level, the actual \
+            messages (or lower-level summaries) that were summarized, and the index \
+            of the final summarized message in the full chat thread"
+    )
+    archived_memory: List[Dict[str, Any]] = Field(
+        default=[],
+        description="Summaries which have been collapsed into the top-level summary."
+    )
 
     def update_all_memory(self):
         """
@@ -696,7 +338,7 @@ class HierarchicalSummaryMemory(ChatMemory):
                 prior_summaries=self.all_memory
             )
             # update entity list
-            self.entity_list = self._update_entities(
+            self.entity_manager.update_entities(
                 messages=summarized_messages,
                 prior_summaries=self.all_memory[:start_summ_index]
             )
@@ -733,54 +375,13 @@ class HierarchicalSummaryMemory(ChatMemory):
         # construct system prompt
         sys_prompt = {
             'role': 'system',
-            'content': self.summarization_prompt.format(context="\n\n".join([ps['content'] for ps in prior_summaries]))
+            'content': self.summary_prompt.format(context="\n\n".join([ps['content'] for ps in prior_summaries]))
         }
         user_prompt = {
             'role': 'user',
             'content': "Please summarize the following messages:\n\n" + "\n\n".join([m['content'] for m in messages])
         }
         # generate the summary
-        llm_response = self.summary_llm.generate_instruct(
-            messages=[sys_prompt, user_prompt],
-            respond=True,
-            response_role="assistant",
-            stream=False
-        )
-        # pull the first/only result off the generator and strip whitespace
-        return next(llm_response)['response'].strip()
-
-    def _update_entities(self, messages:list, prior_summaries:list=[]):
-        """
-        Update a free-form list of previously-mentioned entities, optionally including a list of 
-        older summaries as context.
-
-        Args:
-        messages (list): a list of messages to extract/update entities from
-        prior_summaries (list): a list of older summaries to be used as context when updating
-
-        Returns: the updated entity list
-        """
-        # if no prior context, just put 'None' in as a placeholder
-        if len(prior_summaries) == 0:
-            prior_summaries = [{ 'content': "No prior context." }]
-        # if no existing entity list, put in a placeholder
-        old_ent_list = self.entity_list
-        if old_ent_list is None or len(old_ent_list) == 0:
-            old_ent_list = "No prior entity list available."
-        
-        # construct system prompt
-        sys_prompt = {
-            'role': 'system',
-            'content': self.prompt_entity_list.format(
-                context="\n\n".join([ps['content'] for ps in prior_summaries]),
-                entities=old_ent_list
-            )
-        }
-        user_prompt = {
-            'role': 'user',
-            'content': "Please update the entity list using information from the following messages:\n\n" + "\n\n".join([m['content'] for m in messages])
-        }
-        # generate the entity list
         llm_response = self.summary_llm.generate_instruct(
             messages=[sys_prompt, user_prompt],
             respond=True,
@@ -884,7 +485,7 @@ class HierarchicalSummaryMemory(ChatMemory):
             result += "{{L" + str(mem['level']) + "@" + str(mem['msg_idx']) + "}}\n" + mem['content'] + "\n"
         return result
     
-    memory_regex = re.compile(r"{{L(\d+)@(\d+)}}")
+    memory_regex: ClassVar[re.Pattern[AnyStr]] = re.compile(r"{{L(\d+)@(\d+)}}")
 
     def import_readable(self, formatted_messages:str):
         """
@@ -911,64 +512,150 @@ class HierarchicalSummaryMemory(ChatMemory):
             parsed_messages.append(msg_dict)
         self.all_memory = parsed_messages
 
-    def to_json(self):
-        """
-        Write this object out as a JSON object.
+class StatefulChatManager(ABC, BaseModel):
+    """
+    Top-level class managing all the moving parts of a stateful chat.
+    """
 
-        Returns: a string containing the JSON object
-        """
-        # define state to save
-        settings_to_download = {"summary_llm": self.summary_llm.to_json(),
-                                "chat_thread": self.chat_thread.to_json(),
-                                "summarization_prompt": self.summarization_prompt,
-                                "prop_ctx": self.prop_ctx,
-                                "prop_summary": self.prop_summary,
-                                "n_levels": self.n_levels,
-                                "n_tok_summarize": self.n_tok_summarize,
-                                "all_memory": self.all_memory,
-                                "archived_memory": self.archived_memory,
-                                "entity_list": self.entity_list,
-                                "prompt_entity_list": self.prompt_entity_list
-                                }
-        # dump it to a JSON file
-        return json.dumps(settings_to_download)
+    llm: SerializeAsAny[LLMType] = Field(
+        default=...,
+        discriminator='llm_class',
+        description="The LLM instance to use for generating responses."
+    )
+    chat_memory: SerializeAsAny[ChatMemory] = Field(
+        default=...,
+        description="Memory instance to track long-term memory of the chat thread. \
+            NOTE: ensure that this memory is managing the same object passed as chat_thread!"
+    )
 
-    @classmethod
-    def from_json(cls, json_data):
+    def append_message(self, message):
         """
-        Load saved session state from a JSON object.
+        Append message.
+
         Args:
-        json_data (str): JSON object or file containing session data
-
-        Returns: a new ChatSession object initialized from the JSON data
+        message (dict): Dict containing at least 'role' and 'content' keys
         """
-        # load saved state
-        if type(json_data) == str:
-            uploaded_settings = json.loads(json_data)
-        else:
-            uploaded_settings = json.load(json_data)
-        # initialize LLM
-        llm = OpenAILLM.from_json(uploaded_settings.get('summary_llm'))
-        # load associated chat thread
-        ct = ChatThread.from_json(uploaded_settings.get('chat_thread'))
-        # create new memory object
-        new_obj = cls(
-            summary_llm=llm,
-            chat_thread=ct,
-            summary_prompt=uploaded_settings.get('summarization_prompt')
-            )
-        # load summary sizing parameters
-        new_obj.prop_ctx = uploaded_settings["prop_ctx"]
-        new_obj.prop_summary = uploaded_settings["prop_summary"]
-        new_obj.n_levels = uploaded_settings["n_levels"]
-        new_obj.n_tok_summarize = uploaded_settings["n_tok_summarize"]
-        # load active summaries
-        new_obj.all_memory = uploaded_settings["all_memory"]
-        # load archived summaries
-        new_obj.archived_memory = uploaded_settings["archived_memory"]
-        # get entity list, if any
-        new_obj.entity_list = uploaded_settings.get('entity_list', None)
-        # get custom prompt, if any
-        new_obj.prompt_entity_list = uploaded_settings.get('prompt_entity_list', new_obj.prompt_entity_list)
-        # return object
-        return new_obj
+        ct = self.chat_memory.chat_thread
+        # if missing, set ID to be the message index
+        if not "id" in message:
+            message['id'] = len(ct.messages) + len(ct.archived_messages)
+        # add to the active chat thread
+        ct.messages.append(message)
+        # Needs updating: embed regenerated AI response
+        #st.session_state.chat_session.embed_text(st.session_state.chat_session.messages[-1], "message")
+
+    def messages_to_memory(self, n_msgs):
+        """
+        Remove a number of the oldest messages from context and commit them
+        to memory.
+
+        Args:
+        n_msgs (int): Number of oldest messages
+        """
+        ct = self.chat_memory.chat_thread
+        # pull messages
+        old_msgs = ct.messages[0:n_msgs]
+        # add to memory. Send system prompt or the model goes insane
+        self.chat_memory.add_messages(old_msgs, context=self.compile_system_prompt())
+        # archive messages in thread
+        ct.archive_messages(0, n_msgs)
+
+    def export_thread(self):
+        raise NotImplementedError("Not implemented!")
+
+    def import_thread(self, messages):
+        """
+        Import a thread formatted as text. Existing messages are altered to
+        reflect differences with the imported text.
+        """
+        raise NotImplementedError("Not implemented!")
+
+    def compile_system_prompt(self):
+        """
+        Combine raw prompt, the most recent message summary, and the entity list
+        into a full system prompt.
+
+        TODO: the memory stuff should probably be delegated to the memory class.
+        """
+        ct = self.chat_memory.chat_thread
+        # start with the system prompt for the current chat thread, if any
+        full_sys_prompt = ""
+        if ct.system_prompt is not None:
+            full_sys_prompt += ct.system_prompt.strip()
+        # add top-level summary from memory
+        if self.chat_memory.full_summary is not None:
+            full_sys_prompt += "\n\nComplete summary of all previous messages:\n" + self.chat_memory.full_summary
+        # add entity list, if any
+        if self.chat_memory.entity_list is not None:
+            full_sys_prompt += "\n\nEntitites mentioned previously:\n" + self.chat_memory.entity_list
+        # add latest message summary, if any
+        if len(self.chat_memory.message_summaries) > 0:
+            full_sys_prompt += "\n\nSummary of recent previous messages:\n" + self.chat_memory.message_summaries[-1]['content']
+        return full_sys_prompt
+    
+    def get_response(self, stream=True):
+        """
+        Generate an AI response starting with the end of the current thread.
+        Uses summary messages to ensure we don't overflow the context window.
+
+        Args:
+        stream (bool): whether to stream the response or not
+
+        Returns: a generator if streaming or the response text if not streaming
+        """
+        sys_prompt = self.compile_system_prompt().strip()
+        all_msgs = [{ 'role': "system", 'content': sys_prompt }]
+        # add in-context messages after sys prompt
+        all_msgs.extend(self.chat_memory.chat_thread.messages)
+        # generate response using current thread's AI role
+        return self.llm.generate_instruct(messages=all_msgs,
+                                          respond=True,
+                                          response_role=self.chat_memory.chat_thread.ai_role,
+                                          stream=stream
+                                          )
+
+    def continue_response(self, stream=True):
+        """
+        Continue generating from the end of the most recent message.
+        """
+        # make the system prompt
+        sys_prompt = self.compile_system_prompt().strip()
+        all_msgs = [{ 'role': "system", 'content': sys_prompt }]
+        # add in-context messages after sys prompt
+        all_msgs.extend(self.chat_memory.chat_thread.messages)
+        # continue generating from end of last message
+        return self.llm.generate_instruct(messages=all_msgs,
+                                          respond=False,
+                                          stream=stream
+                                          )
+
+class HierarchicalSummaryManager(StatefulChatManager):
+    """
+    Custom chat manager that compresses long chats into the context window using 
+    heirarchical summaries of older messages, similar to the method used by
+    perchance.ai.
+    """
+
+    chat_memory: SerializeAsAny[HierarchicalSummaryMemory] = Field(
+        default=...,
+        description="Hierarchical memory instance to track long-term memory of the chat thread."
+    )
+
+    def compile_system_prompt(self):
+        """
+        Combine raw prompt and summaries into a full system prompt.
+        """
+        ct = self.chat_memory.chat_thread
+        # start with the system prompt for the current chat thread, if any
+        full_sys_prompt = ""
+        if ct.system_prompt is not None:
+            full_sys_prompt += ct.system_prompt.strip()
+        # add entity list, if any
+        entity_list = self.chat_memory.entity_manager.entity_list
+        if entity_list is not None and len(entity_list) > 0:
+            full_sys_prompt += "\n\nEntities appearing in previous messages:\n" + entity_list
+        # add top-level summary from memory
+        if len(self.chat_memory.all_memory) > 0:
+            mems = [m['content'] for m in self.chat_memory.all_memory]
+            full_sys_prompt += "\n\nSummary of all previous messages:\n" + "\n".join(mems)
+        return full_sys_prompt

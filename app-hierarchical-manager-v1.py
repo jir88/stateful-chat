@@ -1,8 +1,10 @@
 import streamlit as st
 import stateful_chat.manager as scm
 import stateful_chat.llm as scl
+import stateful_chat.entity as sce
 import json
 import os
+import uuid
 
 # app config
 st.set_page_config(page_title="Tater Talk", page_icon="🥔")
@@ -16,8 +18,17 @@ if "chat_session" not in st.session_state:
     # separate LLM for summarizing
     summary_llm = scl.OpenAILLM(model="gemma-3-4B-it-UD-Q4_K_XL-cpu")
     # initialize session manager
-    cs = scm.HierarchicalSummaryManager(llm=llm, summary_llm=summary_llm)
-    cs.chat_thread.system_prompt = ""
+    entity_manager = sce.SimpleEntityManager(llm=summary_llm)
+    chat_thread = scm.ChatThread(session_id=str(uuid.uuid4()), system_prompt="")
+    chat_memory = scm.HierarchicalSummaryMemory(
+        summary_llm=summary_llm,
+        chat_thread=chat_thread,
+        entity_manager=entity_manager
+    )
+    cs = scm.HierarchicalSummaryManager(
+        llm=llm,
+        chat_memory=chat_memory
+    )
     st.session_state.chat_session = cs
 
 # make sure regenerate flag is initialized to 'False'
@@ -45,7 +56,9 @@ def load_state():
     if session_file is None:
         st.warning("No settings file selected!")
         return
-    st.session_state.chat_session = scm.HierarchicalSummaryManager.from_json(session_file)
+    # with open(session_file, mode='r') as f:
+    json_data = session_file.read()
+    st.session_state.chat_session = scm.HierarchicalSummaryManager.model_validate_json(json_data=json_data)
     # set the instruct formats properly in their select boxes
     st.session_state.sb_main_inst_fmt = st.session_state.chat_session.llm.instruct_format.name
     st.session_state.sb_mem_inst_fmt = st.session_state.chat_session.chat_memory.summary_llm.instruct_format.name
@@ -58,7 +71,9 @@ def load_instruct_formats():
     # load each file into a list
     fmt_obj = []
     for ff in fmt_files:
-        inst_fmt = scl.InstructFormat.from_json(open(ff, mode='r'))
+        with open(ff, mode='r') as f:
+            inst_data = f.read()
+        inst_fmt = scl.InstructFormat.model_validate_json(inst_data)
         fmt_obj.append(inst_fmt)
     return fmt_obj
 
@@ -121,35 +136,41 @@ def update_llm_configuration():
         # keep original parameters
         samp_opts = st.session_state.chat_session.chat_memory.summary_llm.sampling_options
         inst_fmt = st.session_state.chat_session.chat_memory.summary_llm.instruct_format
-        st.session_state.chat_session.chat_memory.summary_llm = scl.OpenAILLM(model=st.session_state.ti_mem_llm_name,
-                                                          sampling_options=samp_opts,
-                                                          instruct_fmt=inst_fmt)
-    # update sampling parameters
+        updated_llm = scl.OpenAILLM(
+            model=st.session_state.ti_mem_llm_name,
+            sampling_options=samp_opts,
+            instruct_fmt=inst_fmt
+        )
+        st.session_state.chat_session.chat_memory.summary_llm = updated_llm
+        # we use the same settings for the entity manager
+        st.session_state.chat_session.chat_memory.entity_manager.llm = updated_llm
+    # update sampling parameters for memory and entity manager
     st.session_state.chat_session.chat_memory.summary_llm.sampling_options = json.loads(st.session_state.ta_mem_samp_opts)
+    st.session_state.chat_session.chat_memory.entity_manager.llm.sampling_options = json.loads(st.session_state.ta_mem_samp_opts)
 
 def update_chat_thread_settings():
     """
     Update the chat thread settings: system prompt, user role, and AI role.
     """
     # set the base system prompt
-    st.session_state.chat_session.chat_thread.system_prompt = st.session_state.ta_sys_prompt
+    st.session_state.chat_session.chat_memory.chat_thread.system_prompt = st.session_state.ta_sys_prompt
     # set the user role
-    st.session_state.chat_session.chat_thread.user_role = st.session_state.ti_user_role
+    st.session_state.chat_session.chat_memory.chat_thread.user_role = st.session_state.ti_user_role
     # set the AI/assistant role
-    st.session_state.chat_session.chat_thread.ai_role = st.session_state.ti_ai_role
+    st.session_state.chat_session.chat_memory.chat_thread.ai_role = st.session_state.ti_ai_role
 
 def manual_thread_edit():
     """
     Update the chat messages after user has manually modified them.
     """
     # when the text area changes, put the new version into the session
-    st.session_state.chat_session.chat_thread.import_readable(st.session_state.ta_manual_chat_edit)
+    st.session_state.chat_session.chat_memory.chat_thread.import_readable(st.session_state.ta_manual_chat_edit)
 
 def update_memory_settings():
     """
     Update the parameters and prompts for hierarchical memory.
     """
-    st.session_state.chat_session.chat_memory.summarization_prompt = st.session_state.ta_summary_prompt
+    st.session_state.chat_session.chat_memory.summary_prompt = st.session_state.ta_summary_prompt
     st.session_state.chat_session.chat_memory.prop_ctx = st.session_state.ni_mem_prop_ctx
     st.session_state.chat_session.chat_memory.prop_summary = st.session_state.ni_mem_prop_summary
     st.session_state.chat_session.chat_memory.n_levels = st.session_state.ni_mem_n_levels
@@ -167,10 +188,10 @@ def update_entity_settings():
     Update the entity prompt or entity list.
     """
     # the entity prompt
-    st.session_state.chat_session.chat_memory.prompt_entity_list = st.session_state.ta_entity_prompt
+    st.session_state.chat_session.chat_memory.entity_manager.prompt_entity_list = st.session_state.ta_entity_prompt
     # if we have a current entity list, update it
-    if st.session_state.chat_session.chat_memory.entity_list is not None:
-        st.session_state.chat_session.chat_memory.entity_list = st.session_state.ta_entity_list
+    if st.session_state.chat_session.chat_memory.entity_manager.entity_list is not None:
+        st.session_state.chat_session.chat_memory.entity_manager.entity_list = st.session_state.ta_entity_list
 
 # Construct tabs
 tab_main, tab_mem, tab_arch, tab_db, tab_settings = st.tabs(["Main", "Memory", "Archive", "Database", "Settings"])
@@ -180,7 +201,7 @@ with tab_main:
     # Base system prompt
     st.text_area(
         "System prompt:",
-        st.session_state.chat_session.chat_thread.system_prompt, 
+        st.session_state.chat_session.chat_memory.chat_thread.system_prompt, 
         height = 70, 
         key = "ta_sys_prompt",
         on_change=update_chat_thread_settings)
@@ -188,12 +209,12 @@ with tab_main:
     # conversation roles
     st.text_input(
         "User role:", 
-        st.session_state.chat_session.chat_thread.user_role,
+        st.session_state.chat_session.chat_memory.chat_thread.user_role,
         key="ti_user_role",
         on_change=update_chat_thread_settings)
     st.text_input(
         "AI role:", 
-        st.session_state.chat_session.chat_thread.ai_role,
+        st.session_state.chat_session.chat_memory.chat_thread.ai_role,
         key="ti_ai_role",
         on_change=update_chat_thread_settings)
     
@@ -201,7 +222,7 @@ with tab_main:
     if st.checkbox(label = "Manual editing mode"):
         # we're using manual mode
         # convert conversation to text and stick it in a text editor
-        formatted_text = st.session_state.chat_session.chat_thread.format_readable()
+        formatted_text = st.session_state.chat_session.chat_memory.chat_thread.format_readable()
         st.text_area(
             "Edit raw conversation text:", 
             formatted_text, 
@@ -214,30 +235,30 @@ with tab_main:
         # if so, we need to drop the last message before loading history
         if st.session_state.needs_regen:
             # delete old response
-            del st.session_state.chat_session.chat_thread.messages[-1]
+            del st.session_state.chat_session.chat_memory.chat_thread.messages[-1]
         # now render conversation history in container
         with st.container(height=500):
             # display conversation
-            if len(st.session_state.chat_session.chat_thread.messages) > 0:
-                for msg in st.session_state.chat_session.chat_thread.messages:
+            if len(st.session_state.chat_session.chat_memory.chat_thread.messages) > 0:
+                for msg in st.session_state.chat_session.chat_memory.chat_thread.messages:
                     with st.chat_message(msg['role']):
                         st.write(msg['content'])
             # if we're regenerating, do that now
             if st.session_state.needs_regen:
-                with st.chat_message(st.session_state.chat_session.chat_thread.ai_role):
+                with st.chat_message(st.session_state.chat_session.chat_memory.chat_thread.ai_role):
                     response = st.write_stream(get_response())
                     st.session_state.chat_session.append_message({
-                        'role': st.session_state.chat_session.chat_thread.ai_role,
+                        'role': st.session_state.chat_session.chat_memory.chat_thread.ai_role,
                         'content': response
                     })
                 # reset flag
                 st.session_state.needs_regen = False
             # if we're continuing, do that now
             if st.session_state.needs_continue:
-                with st.chat_message(st.session_state.chat_session.chat_thread.ai_role):
+                with st.chat_message(st.session_state.chat_session.chat_memory.chat_thread.ai_role):
                     response = st.write_stream(get_continuation())
                     st.session_state.chat_session.append_message({
-                        'role': st.session_state.chat_session.chat_thread.ai_role,
+                        'role': st.session_state.chat_session.chat_memory.chat_thread.ai_role,
                         'content': response
                     })
                 # reset flag
@@ -247,17 +268,17 @@ with tab_main:
             if user_query is not None and user_query != "":
                 # add to chat thread
                 st.session_state.chat_session.append_message({
-                        'role': st.session_state.chat_session.chat_thread.user_role,
+                        'role': st.session_state.chat_session.chat_memory.chat_thread.user_role,
                         'content': user_query
                     })
                 # display in chat widget
-                with st.chat_message(st.session_state.chat_session.chat_thread.user_role):
+                with st.chat_message(st.session_state.chat_session.chat_memory.chat_thread.user_role):
                     st.markdown(user_query)
                 # stream AI response
-                with st.chat_message(st.session_state.chat_session.chat_thread.ai_role):
+                with st.chat_message(st.session_state.chat_session.chat_memory.chat_thread.ai_role):
                     response = st.write_stream(get_response())
                     st.session_state.chat_session.append_message({
-                        'role': st.session_state.chat_session.chat_thread.ai_role,
+                        'role': st.session_state.chat_session.chat_memory.chat_thread.ai_role,
                         'content': response
                     })
             # regenerate last message button
@@ -274,7 +295,7 @@ with tab_main:
     
     # save button
     button_download = st.download_button(label="Save Settings",
-                                         data = st.session_state.chat_session.to_json(),
+                                         data = st.session_state.chat_session.model_dump_json(),
                                          file_name=f"settings.json",
                                          key = "session_saver",
                                          help="Click to Download Current Settings")
@@ -289,7 +310,7 @@ with tab_main:
 with tab_mem:
     st.text_area(
         "Summarization system prompt:",
-        st.session_state.chat_session.chat_memory.summarization_prompt,
+        st.session_state.chat_session.chat_memory.summary_prompt,
         height = 200,
         key="ta_summary_prompt",
         on_change=update_memory_settings
@@ -358,17 +379,17 @@ with tab_mem:
     
     st.text_area(
         "Entity list prompt:", 
-        st.session_state.chat_session.chat_memory.prompt_entity_list, 
+        st.session_state.chat_session.chat_memory.entity_manager.prompt_entity_list, 
         height = 150,
         key="ta_entity_prompt",
         on_change=update_entity_settings
     )
     # manual entity editor
-    if st.session_state.chat_session.chat_memory.entity_list is None:
-        st.session_state.chat_session.chat_memory.entity_list = ""
+    if st.session_state.chat_session.chat_memory.entity_manager.entity_list is None:
+        st.session_state.chat_session.chat_memory.entity_manager.entity_list = ""
     st.text_area(
         "Entity list:", 
-        st.session_state.chat_session.chat_memory.entity_list, 
+        st.session_state.chat_session.chat_memory.entity_manager.entity_list, 
         height = 150,
         key="ta_entity_list",
         on_change=update_entity_settings)
@@ -378,7 +399,7 @@ with tab_mem:
         total_size = 0
         # calculate size of raw messages
         level_size = 0
-        for msg in st.session_state.chat_session.chat_thread.messages:
+        for msg in st.session_state.chat_session.chat_memory.chat_thread.messages:
             level_size += st.session_state.chat_session.llm.count_tokens(msg['content'])
         total_size += level_size
         # calculate percent of alloted space
@@ -400,8 +421,8 @@ with tab_arch:
     # render non-editable archived conversation history in container
     with st.container(height=800):
         # display conversation
-        if len(st.session_state.chat_session.chat_thread.messages) > 0:
-            for msg in st.session_state.chat_session.chat_thread.archived_messages:
+        if len(st.session_state.chat_session.chat_memory.chat_thread.messages) > 0:
+            for msg in st.session_state.chat_session.chat_memory.chat_thread.archived_messages:
                 with st.chat_message(msg['role']):
                     st.write(msg['content'])
     # end chat container
