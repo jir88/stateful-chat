@@ -32,10 +32,6 @@ class EntityManager(BaseModel, ABC):
     injecting them into context as needed.
     """
 
-    class Config:
-        arbitrary_types_allowed = True
-        allow_mutation = True
-
     def update_entities(self, messages: List[Dict[str, str]], prior_summaries: List[Dict[str, str]] = []) -> Any:
         """
         Update a list of previously-mentioned entities, optionally including a list of
