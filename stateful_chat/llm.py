@@ -118,14 +118,17 @@ class LLM(BaseModel, ABC):
         """
         raise NotImplementedError("Method must be implemented in a subclass!")
 
-    def generate_instruct(self, messages, stream=True):
+    def generate_instruct(self, messages, respond=True, response_role=None, stream=True):
         """
         Generate a response to a given text prompt. If stream is true, function returns a generator
         that yields the response chunks as they become available. Otherwise, the full response is
         returned as a string.
 
         Args:
-        messages (str): The chat messages that the LLM should respond to
+        messages (list[dict]): The chat messages that the LLM should respond to
+        respond (bool): If true, LLM will respond to last message. If false, LLM will
+            continue generating from the end of the last message.
+        response_role (str): The role LLM should use when responding.
         stream (bool): Whether the response should be streamed as it is generated
 
         Returns:
