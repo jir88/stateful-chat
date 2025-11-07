@@ -651,8 +651,9 @@ class HierarchicalSummaryManager(StatefulChatManager):
         if ct.system_prompt is not None:
             full_sys_prompt += ct.system_prompt.strip()
         # add entity list, if any
-        if self.chat_memory.entity_list is not None and len(self.chat_memory.entity_list) > 0:
-            full_sys_prompt += "\n\nEntities appearing in previous messages:\n" + self.chat_memory.entity_list
+        entity_list = self.chat_memory.entity_manager.entity_list
+        if entity_list is not None and len(entity_list) > 0:
+            full_sys_prompt += "\n\nEntities appearing in previous messages:\n" + entity_list
         # add top-level summary from memory
         if len(self.chat_memory.all_memory) > 0:
             mems = [m['content'] for m in self.chat_memory.all_memory]
