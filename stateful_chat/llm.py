@@ -4,7 +4,7 @@ import json
 import openai
 import requests
 from abc import ABC
-from typing import Union,ClassVar,Dict,Optional,Any,Literal
+from typing import Union,ClassVar,Dict,Optional,Any,Literal,List,Type
 from pydantic import BaseModel,TypeAdapter,Field
 
 # boilerplate to allow automatically casting serialized LLMs to the proper class
@@ -133,6 +133,19 @@ class LLM(BaseModel, ABC):
 
         Returns:
         A generator function if stream is true, otherwise a string containing the response.
+        """
+        raise NotImplementedError("Method must be implemented in a subclass!")
+    
+    def generate_structured(self, messages:List[Dict[str,str]], response_model:Type[BaseModel]):
+        """
+        Respond to a prompt using structured JSON mode.
+
+        Args:
+            messages (List[Dict[str,str]]): The list of prior messages.
+            response_model (BaseModel): A pydantic type defining the JSON schema the LLM must use to respond.
+
+        Returns:
+            The response as a pydantic object.
         """
         raise NotImplementedError("Method must be implemented in a subclass!")
     
@@ -493,14 +506,14 @@ class OpenAILLM(LLM):
         returned as a string.
 
         Args:
-        messages (list[dict]): The chat messages that the LLM should respond to
-        respond (bool): If true, LLM will respond to last message. If false, LLM will
-            continue generating from the end of the last message.
-        response_role (str): The role LLM should use when responding.
-        stream (bool): Whether the response should be streamed as it is generated
+            messages (list[dict]): The chat messages that the LLM should respond to
+            respond (bool): If true, LLM will respond to last message. If false, LLM will
+                continue generating from the end of the last message.
+            response_role (str): The role LLM should use when responding.
+            stream (bool): Whether the response should be streamed as it is generated
 
         Returns:
-        A generator function if stream is true, otherwise a string containing the response.
+            A generator function if stream is true, otherwise a string containing the response.
         """
         # TODO: convert to optionally use the actual chat API?
         if respond and response_role is None:
@@ -516,6 +529,31 @@ class OpenAILLM(LLM):
         # now generate using regular completion endpoint
         result = self.generate(prompt=fmt_msgs, stream=stream)
         return result
+
+    def generate_structured(self, messages:List[Dict[str,str]], response_model:Type[BaseModel]):
+        """
+        Respond to a prompt using structured JSON mode.
+
+        Args:
+            messages (List[Dict[str,str]]): The list of prior messages.
+            response_model (BaseModel): A pydantic type defining the JSON schema the LLM must use to respond.
+
+        Returns:
+            The response as a pydantic object.
+        """
+        print(str(response_model))
+        response = self.client.chat.completions.create(
+            model=self.model, 
+            messages=messages, 
+            stream=False,
+            response_format={"type": "json_schema", "json_schema": response_model.model_json_schema()},
+            # try shoving all sampling parameters through this mechanism to avoid manually
+            # specifying the canonical OpenAI ones
+            extra_body=self.sampling_options
+        )
+        # validate the response
+        parsed_response = response_model.model_validate_json(response.choices[0].message.content)
+        return parsed_response
 
     def count_tokens(self, text:str):
         """
