@@ -26,6 +26,33 @@ class Entity:
     is_in_context: bool
     """Whether or not this entity is currently injected into the chat thread."""
 
+class GenEntity(BaseModel):
+    """
+    A simplified entity type containing only the parts of entities that we want to
+    have the LLM generate. We keep other programmatic bookkeeping stuff out of here
+    to avoid unnecesary cognitive load on the LLM.
+    """
+
+    name: str = Field(
+        default=...,
+        description="The name of this entity."
+    )
+    description: str = Field(
+        default=...,
+        description="A description of this entity. Write more detailed descriptions for more important entities."
+    )
+
+class GenEntityList(BaseModel):
+    """
+    A simplified entity list type containing only the parts of entities that we want to
+    have the LLM generate. We keep other programmatic bookkeeping stuff out of here
+    to avoid unnecesary cognitive load on the LLM.
+    """
+
+    entities: List[GenEntity] = Field(
+        description="A list of all the entities."
+    )
+
 class EntityManager(BaseModel, ABC):
     """
     Keeps track of entities that have been extracted from a chat thread and manages
@@ -126,4 +153,89 @@ class SimpleEntityManager(EntityManager):
 
         # pull the first/only result off the generator and strip whitespace
         self.entity_list = next(llm_response)['response'].strip()
+        return self.entity_list
+
+class JSONEntityManager(EntityManager):
+    """
+    Keeps track of entities that have been extracted from a chat thread as a single monolithic
+    block of text.
+    """
+
+    llm: SerializeAsAny[LLMType] = Field(
+        default=...,
+        discriminator='llm_class',
+        description="LLM instance used to generate the entity list")
+    entity_list: GenEntityList = Field(
+        default=GenEntityList(entities=[]), 
+        description="A list of the entities mentioned in this chat thread."
+    )
+    prompt_entity_list: str = Field(
+        default=(
+            "You are creating a list of all important entities mentioned thus far "
+            "and a brief description of each. The list will be formatted as a list of JSON objects. "
+            "You will be given any relevant prior context and the user "
+            "will provide the messages from which you should extract or update entities. For people, "
+            "include a brief description of their personalities and appearance. Write more detailed "
+            "descriptions for more important entities.\n\n"
+            "Prior context:\n"
+            "{context}\n\n"
+            "Existing JSON list of entities to be updated:\n"
+            "{entities}\n\n"
+            "Now the user will provide you with the messages from which you should extract entity information. "
+            "Respond only with a JSON list of significant entities and a description of each entity, no "
+            "additional commentary."
+        ),
+        description="System prompt used when asking the LLM to produce or update the entity list"
+    )
+
+    @root_validator(pre=True)
+    def ensure_llm_present(cls, values):
+        if 'llm' not in values or values.get('llm') is None:
+            raise ValueError("llm is required for SimpleEntityManager")
+        return values
+
+    def update_entities(self, messages: List[Dict[str, str]], prior_summaries: List[Dict[str, str]] = []) -> str:
+        """
+        Update a list of previously-mentioned entities, optionally including a list of
+        older summaries as context.
+
+        Args:
+            messages: a list of messages to extract/update entities from
+            prior_summaries: a list of older summaries to be used as context when updating
+
+        Returns:
+            the updated entity list (string)
+        """
+        # if no prior context, just put 'No prior context.' in as a placeholder
+        if not prior_summaries:
+            prior_summaries = [{'content': "No prior context."}]
+
+        # if no existing entity list, put in a placeholder
+        old_ent_list = self.entity_list
+        if old_ent_list is None or len(old_ent_list) == 0:
+            old_ent_list = "No prior entity list available."
+
+        # construct system prompt
+        sys_prompt = {
+            'role': 'system',
+            'content': self.prompt_entity_list.format(
+                context="\n\n".join([ps['content'] for ps in prior_summaries]),
+                entities="\n\n".join([ent.name + ": " + ent.description for ent in old_ent_list])
+            )
+        }
+        user_prompt = {
+            'role': 'user',
+            'content': "Please update the entity list using information from the following messages:\n\n"
+                       + "\n\n".join([m['content'] for m in messages])
+        }
+
+        # generate the entity list using the provided LLM interface
+        llm_response = self.llm.generate_structured(
+            messages=[sys_prompt, user_prompt],
+            response_model=GenEntityList
+        )
+
+        # entity list is alredy parsed to a GenEntityList
+        # for this simple implementation, we'll just keep it as that
+        self.entity_list = llm_response
         return self.entity_list
