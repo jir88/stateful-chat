@@ -58,6 +58,8 @@ class EntityManager(BaseModel, ABC):
     Keeps track of entities that have been extracted from a chat thread and manages
     injecting them into context as needed.
     """
+    # type name for deserialization
+    entity_manager_class:Literal['base'] = "base"
 
     def update_entities(self, messages: List[Dict[str, str]], prior_summaries: List[Dict[str, str]] = []) -> Any:
         """
@@ -78,6 +80,8 @@ class SimpleEntityManager(EntityManager):
     Keeps track of entities that have been extracted from a chat thread as a single monolithic
     block of text.
     """
+    # type name for deserialization
+    entity_manager_class:Literal['SimpleEntityManager'] = "SimpleEntityManager"
 
     llm: SerializeAsAny[LLMType] = Field(
         default=...,
@@ -160,6 +164,8 @@ class JSONEntityManager(EntityManager):
     Keeps track of entities that have been extracted from a chat thread as a single monolithic
     block of text.
     """
+    # type name for deserialization
+    entity_manager_class:Literal['JSONEntityManager'] = "JSONEntityManager"
 
     llm: SerializeAsAny[LLMType] = Field(
         default=...,
@@ -239,3 +245,7 @@ class JSONEntityManager(EntityManager):
         # for this simple implementation, we'll just keep it as that
         self.entity_list = llm_response
         return self.entity_list
+
+# a union type covering the possible entity manager types
+# you can discriminate it by using Field(discriminator='entity_manager_class')
+EntityManagerType = Union[EntityManager, SimpleEntityManager, JSONEntityManager]
