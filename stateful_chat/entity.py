@@ -50,6 +50,7 @@ class GenEntityList(BaseModel):
     """
 
     entities: List[GenEntity] = Field(
+        default=[],
         description="A list of all the entities."
     )
 
