@@ -245,6 +245,18 @@ class JSONEntityManager(EntityManager):
         # for this simple implementation, we'll just keep it as that
         self.entity_list = llm_response
         return self.entity_list
+    
+    def format_readable(self) -> str:
+        """
+        Convert entities to JSON for manual editing.
+        """
+        return self.entity_list.model_dump_json(indent=2)
+
+    def import_readable(self, entity_data:str):
+        """
+        Import entity definitions from JSON.
+        """
+        self.entity_list.model_validate_json(entity_data)
 
 # a union type covering the possible entity manager types
 # you can discriminate it by using Field(discriminator='entity_manager_class')
