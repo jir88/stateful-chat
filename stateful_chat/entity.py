@@ -217,16 +217,19 @@ class JSONEntityManager(EntityManager):
             prior_summaries = [{'content': "No prior context."}]
 
         # if no existing entity list, put in a placeholder
-        old_ent_list = self.entity_list
+        old_ent_list = self.entity_list.entities
+        
         if old_ent_list is None or len(old_ent_list) == 0:
-            old_ent_list = "No prior entity list available."
+            ent_txt = "No prior entity list available."
+        else:
+            ent_txt = "\n\n".join([ent.name + ": " + ent.description for ent in old_ent_list])
 
         # construct system prompt
         sys_prompt = {
             'role': 'system',
             'content': self.prompt_entity_list.format(
                 context="\n\n".join([ps['content'] for ps in prior_summaries]),
-                entities="\n\n".join([ent.name + ": " + ent.description for ent in old_ent_list])
+                entities=ent_txt
             )
         }
         user_prompt = {
