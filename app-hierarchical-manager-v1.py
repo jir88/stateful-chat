@@ -18,14 +18,14 @@ if "chat_session" not in st.session_state:
     # separate LLM for summarizing
     summary_llm = scl.OpenAILLM(model="gemma-3-4B-it-UD-Q4_K_XL-cpu")
     # initialize session manager
-    entity_manager = sce.SimpleEntityManager(llm=summary_llm)
+    entity_manager = sce.JSONEntityManager(llm=summary_llm)
     chat_thread = scm.ChatThread(session_id=str(uuid.uuid4()), system_prompt="")
-    chat_memory = scm.HierarchicalSummaryMemory(
+    chat_memory = scm.StructuredHierarchicalMemory(
         summary_llm=summary_llm,
         chat_thread=chat_thread,
         entity_manager=entity_manager
     )
-    cs = scm.HierarchicalSummaryManager(
+    cs = scm.StructuredHierarchicalManager(
         llm=llm,
         chat_memory=chat_memory
     )
@@ -58,7 +58,7 @@ def load_state():
         return
     # with open(session_file, mode='r') as f:
     json_data = session_file.read()
-    st.session_state.chat_session = scm.HierarchicalSummaryManager.model_validate_json(json_data=json_data)
+    st.session_state.chat_session = scm.StructuredHierarchicalManager.model_validate_json(json_data=json_data)
     # set the instruct formats properly in their select boxes
     st.session_state.sb_main_inst_fmt = st.session_state.chat_session.llm.instruct_format.name
     st.session_state.sb_mem_inst_fmt = st.session_state.chat_session.chat_memory.summary_llm.instruct_format.name
@@ -187,11 +187,11 @@ def update_entity_settings():
     """
     Update the entity prompt or entity list.
     """
+    entity_manager = st.session_state.chat_session.chat_memory.entity_manager
     # the entity prompt
-    st.session_state.chat_session.chat_memory.entity_manager.prompt_entity_list = st.session_state.ta_entity_prompt
+    entity_manager.prompt_entity_list = st.session_state.ta_entity_prompt
     # if we have a current entity list, update it
-    if st.session_state.chat_session.chat_memory.entity_manager.entity_list is not None:
-        st.session_state.chat_session.chat_memory.entity_manager.entity_list = st.session_state.ta_entity_list
+    entity_manager.import_readable(st.session_state.ta_entity_list)
 
 # Construct tabs
 tab_main, tab_mem, tab_arch, tab_db, tab_settings = st.tabs(["Main", "Memory", "Archive", "Database", "Settings"])
@@ -385,11 +385,9 @@ with tab_mem:
         on_change=update_entity_settings
     )
     # manual entity editor
-    if st.session_state.chat_session.chat_memory.entity_manager.entity_list is None:
-        st.session_state.chat_session.chat_memory.entity_manager.entity_list = ""
     st.text_area(
         "Entity list:", 
-        st.session_state.chat_session.chat_memory.entity_manager.entity_list, 
+        st.session_state.chat_session.chat_memory.entity_manager.format_readable(), 
         height = 150,
         key="ta_entity_list",
         on_change=update_entity_settings)
