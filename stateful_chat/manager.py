@@ -8,7 +8,7 @@ from abc import ABC
 
 
 from stateful_chat.llm import OpenAILLM,InstructFormat,LLM,LLMType
-from stateful_chat.entity import Entity,EntityManager,SimpleEntityManager
+from stateful_chat.entity import Entity,EntityManager,SimpleEntityManager,JSONEntityManager
 
 class ChatThread(BaseModel):
     """
@@ -521,6 +521,17 @@ class HierarchicalSummaryMemory(ChatMemory):
             parsed_messages.append(msg_dict)
         self.all_memory = parsed_messages
 
+class StructuredHierarchicalMemory(HierarchicalSummaryMemory):
+    """
+    Manages chat memory using the same hierarchical method as the superclass.
+    Entity management uses pydantic to generate and load entities.
+    """
+    
+    entity_manager: SerializeAsAny[JSONEntityManager] = Field(
+        default=...,
+        description="The entity manager object associated with this memory object."
+    )
+
 class StatefulChatManager(ABC, BaseModel):
     """
     Top-level class managing all the moving parts of a stateful chat.
@@ -668,3 +679,18 @@ class HierarchicalSummaryManager(StatefulChatManager):
             mems = [m['content'] for m in self.chat_memory.all_memory]
             full_sys_prompt += "\n\nSummary of all previous messages:\n" + "\n".join(mems)
         return full_sys_prompt
+
+class StructuredHierarchicalManager(HierarchicalSummaryManager):
+    """
+    Custom chat manager that compresses long chats into the context window using 
+    heirarchical summaries of older messages, similar to the method used by
+    perchance.ai.
+
+    This manager uses JSON-formatted generation to provide more fine-grained control
+    over entity creation and management.
+    """
+
+    chat_memory: SerializeAsAny[StructuredHierarchicalMemory] = Field(
+        default=...,
+        description="Hierarchical memory instance to track long-term memory of the chat thread."
+    )
