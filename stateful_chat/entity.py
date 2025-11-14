@@ -1,5 +1,5 @@
 from abc import ABC
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Literal, Union
 from pydantic import BaseModel,Field,SerializeAsAny,root_validator
 
 from .llm import LLM,LLMType
