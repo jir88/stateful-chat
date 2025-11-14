@@ -338,7 +338,7 @@ class HierarchicalSummaryMemory(ChatMemory):
                 prior_summaries=self.all_memory
             )
             # update entity list
-            self.entity_manager.update_entities(
+            self._update_entity_definitions(
                 messages=summarized_messages,
                 prior_summaries=self.all_memory[:start_summ_index]
             )
@@ -390,6 +390,15 @@ class HierarchicalSummaryMemory(ChatMemory):
         )
         # pull the first/only result off the generator and strip whitespace
         return next(llm_response)['response'].strip()
+    
+    def _update_entity_definitions(self, messages: List[Dict[str, str]], prior_summaries: List[Dict[str, str]]):
+        """
+        Update any relevant entities. Extend this method to provide more complex handling.
+        """
+        self.entity_manager.update_entities(
+                messages=messages,
+                prior_summaries=prior_summaries
+            )
 
     def _get_index_of_first_summary_in_level(self, level:int):
         if len(self.all_memory) == 0:
