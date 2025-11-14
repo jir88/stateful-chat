@@ -16,9 +16,10 @@ from pathlib import Path
 from typing import Dict,Any
 from pydantic import ValidationError
 
-from stateful_chat.entity import SimpleEntityManager
-from stateful_chat.llm import LLM,OpenAILLM,InstructFormat
-from stateful_chat.manager import HierarchicalSummaryMemory,HierarchicalSummaryManager,ChatThread
+from stateful_chat.entity import SimpleEntityManager, JSONEntityManager
+from stateful_chat.llm import LLM,OpenAILLM,InstructFormat,LLMType
+from stateful_chat.manager import HierarchicalSummaryMemory,HierarchicalSummaryManager,ChatThread,StatefulChatManager
+from stateful_chat.manager import StructuredHierarchicalManager, StructuredHierarchicalMemory
 
 # def chat_manager_from_json(cls, json_data):
 #     """
@@ -138,6 +139,9 @@ def instruct_format_from_json(json_data):
     # if data is a string
     if type(json_data) == str:
         uploaded_settings = json.loads(json_data)
+    elif isinstance(json_data, dict):
+        # already parsed into a dict
+        uploaded_settings = json_data
     else:
         uploaded_settings = json.load(json_data)
     # create new session object
@@ -162,8 +166,18 @@ def llm_from_json(json_data):
     # load saved state
     if type(json_data) == str:
         uploaded_settings = json.loads(json_data)
+    elif isinstance(json_data, dict):
+        # already parsed into a dict
+        uploaded_settings = json_data
     else:
         uploaded_settings = json.load(json_data)
+    
+    # if there is a llm-class key, this is already pydantic compatible
+    if uploaded_settings.get('llm_class') is not None:
+        if uploaded_settings.get('llm_class') == "OpenAILLM":
+            llm = OpenAILLM(**uploaded_settings)
+        else:
+            raise NotImplementedError("Can't handle other LLM subclasses yet! :/")
     # get model name
     model_name = uploaded_settings.get('model')
     # pull sampling options
@@ -264,10 +278,50 @@ def hier_mem_from_json(json_data):
     # return object
     return new_obj
 
+def upgrade_hier_mgr(input_data: Dict[str, Any]) -> HierarchicalSummaryManager:
+    # load LLM
+    llm = llm_from_json(input_data.get('llm'))
+    
+    # load chat memory
+    mem_data = input_data.get('chat_memory')
+    chat_thread = ChatThread(**mem_data.get('chat_thread'))
+    summary_llm = llm_from_json(json_data=mem_data.get('summary_llm'))
+    # TODO: actually try to fix the entities
+    entity_manager = JSONEntityManager(llm=summary_llm)
+    print(str(summary_llm))
+    memory = StructuredHierarchicalMemory(
+        summary_llm=summary_llm,
+        chat_thread=chat_thread,
+        entity_manager=entity_manager,
+        summary_prompt=mem_data.get('summary_prompt'),
+        prop_ctx=mem_data.get('prop_ctx'),
+        prop_summary=mem_data.get('prop_summary'),
+        n_levels=mem_data.get('n_levels'),
+        n_tok_summarize=mem_data.get('n_tok_summarize'),
+        all_memory=mem_data.get('all_memory'),
+        archived_memory=mem_data.get('archived_memory')
+    )
+    
+    manager = StructuredHierarchicalManager(
+        llm=llm,
+        chat_memory=memory
+    )
+
+    return manager
+
 def convert_chat(input_data: Dict[str, Any]) -> str:
-    # if this is an old non-hierarchical format, try to recover it
-    # TODO: convert regular managers into hierarchical ones with no summaries?
     if input_data.get('chat_thread') is None:
+        # might be Hierarchical memory in pydantic form
+        # because top-level chat thread was removed during 
+        # the pydantic conversion
+        mem = input_data.get('chat_memory')
+        if mem is not None and mem.get('n_levels') is not None:
+            # definitely hierarchical memory
+            new_obj = upgrade_hier_mgr(input_data=input_data)
+            return new_obj.model_dump_json(indent=2)
+        # if this is an old non-hierarchical format, try to recover it
+        # TODO: convert regular managers into hierarchical ones with no summaries?
+        # TODO: upgrade data from stateful chat manager to latest version
         return StatefulChatManager._recover_old_json_format(uploaded_settings)
     # initialize LLM
     # TODO: use some dynamic loading to handle other classes
