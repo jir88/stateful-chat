@@ -260,7 +260,7 @@ class JSONEntityManager(EntityManager):
         """
         Import entity definitions from JSON.
         """
-        self.entity_list.model_validate_json(entity_data)
+        self.entity_list = GenEntityList.model_validate_json(entity_data)
 
 # a union type covering the possible entity manager types
 # you can discriminate it by using Field(discriminator='entity_manager_class')
