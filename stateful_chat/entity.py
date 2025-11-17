@@ -223,7 +223,7 @@ class JSONEntityManager(EntityManager):
         if old_ent_list is None or len(old_ent_list) == 0:
             ent_txt = "No prior entity list available."
         else:
-            ent_txt = "\n\n".join([ent.name + ": " + ent.description for ent in old_ent_list])
+            ent_txt = self.entity_list.model_dump_json()
 
         # construct system prompt
         sys_prompt = {
