@@ -193,6 +193,13 @@ def update_entity_settings():
     # if we have a current entity list, update it
     entity_manager.import_readable(st.session_state.ta_entity_list)
 
+def do_memory_update():
+    """
+    Run a full update of memory and entities if the context has gotten too large.
+    """
+    # tell state manager to update memory, ensuring all levels are within limits
+    st.session_state.chat_session.chat_memory.update_all_memory()
+
 # Construct tabs
 tab_main, tab_mem, tab_arch, tab_db, tab_settings = st.tabs(["Main", "Memory", "Archive", "Database", "Settings"])
 # =============== Main Tab ========================
@@ -300,9 +307,7 @@ with tab_main:
                                          key = "session_saver",
                                          help="Click to Download Current Settings")
     
-    if st.button(label="Update memory"):
-        # tell state manager to update memory, ensuring all levels are within limits
-        st.session_state.chat_session.chat_memory.update_all_memory()
+    st.button(label="Update memory", on_click=do_memory_update)
 
 # ====================== Memory Tab ========================
 
