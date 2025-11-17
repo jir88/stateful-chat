@@ -1,11 +1,8 @@
-import json
-# import ollama
-# import llama_cpp
 import openai
 import requests
 from abc import ABC
-from typing import Union,ClassVar,Dict,Optional,Any,Literal,List,Type
-from pydantic import BaseModel,TypeAdapter,Field
+from typing import Union,Dict,Optional,Any,Literal,List,Type
+from pydantic import BaseModel,Field
 
 # boilerplate to allow automatically casting serialized LLMs to the proper class
 # use the @register decorator to register classes with this registry

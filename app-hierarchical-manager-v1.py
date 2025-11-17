@@ -296,7 +296,7 @@ with tab_main:
     # save button
     button_download = st.download_button(label="Save Settings",
                                          data = st.session_state.chat_session.model_dump_json(),
-                                         file_name=f"settings.json",
+                                         file_name="settings.json",
                                          key = "session_saver",
                                          help="Click to Download Current Settings")
     

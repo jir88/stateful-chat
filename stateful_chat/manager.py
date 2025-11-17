@@ -1,14 +1,11 @@
-import copy
-import uuid
-import json
 import re
-from typing import List, Optional, Dict, Any, Iterator, AnyStr, ClassVar
-from pydantic import BaseModel, Field, root_validator, SerializeAsAny
+from typing import List, Optional, Dict, Any, AnyStr, ClassVar
+from pydantic import BaseModel, Field, SerializeAsAny
 from abc import ABC
 
 
-from stateful_chat.llm import OpenAILLM,InstructFormat,LLM,LLMType
-from stateful_chat.entity import Entity,EntityManager,SimpleEntityManager,JSONEntityManager
+from stateful_chat.llm import OpenAILLM,LLMType
+from stateful_chat.entity import SimpleEntityManager,JSONEntityManager
 
 class ChatThread(BaseModel):
     """
@@ -557,7 +554,7 @@ class StatefulChatManager(ABC, BaseModel):
         """
         ct = self.chat_memory.chat_thread
         # if missing, set ID to be the message index
-        if not "id" in message:
+        if "id" not in message:
             message['id'] = len(ct.messages) + len(ct.archived_messages)
         # add to the active chat thread
         ct.messages.append(message)
