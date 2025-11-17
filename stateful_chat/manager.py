@@ -691,3 +691,24 @@ class StructuredHierarchicalManager(HierarchicalSummaryManager):
         default=...,
         description="Hierarchical memory instance to track long-term memory of the chat thread."
     )
+
+    def compile_system_prompt(self):
+        """
+        Combine raw prompt and summaries into a full system prompt.
+        """
+        ct = self.chat_memory.chat_thread
+        # start with the system prompt for the current chat thread, if any
+        full_sys_prompt = ""
+        if ct.system_prompt is not None:
+            full_sys_prompt += ct.system_prompt.strip()
+        # add entity list, if any
+        entity_list = self.chat_memory.entity_manager.entity_list.entities
+        if entity_list is not None and len(entity_list) > 0:
+            ent_txt = "\n\n".join([ent.name + ": " + ent.description for ent in entity_list])
+            full_sys_prompt += "\n\nEntities appearing in previous messages:\n" + ent_txt
+        # add top-level summary from memory
+        if len(self.chat_memory.all_memory) > 0:
+            mems = [m['content'] for m in self.chat_memory.all_memory]
+            full_sys_prompt += "\n\nSummary of all previous messages:\n" + "\n".join(mems)
+        print(full_sys_prompt)
+        return full_sys_prompt
