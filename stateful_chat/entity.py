@@ -185,7 +185,7 @@ class JSONEntityManager(EntityManager):
             "You are creating a list of all important entities mentioned thus far "
             "and a brief description of each. You will be given any relevant prior context. "
             "You will also have a copy of the current entity list. Finally, you "
-            "will recieve the messages from which you should extract or update entities. For people, "
+            "will receive the messages from which you should extract or update entities. For people, "
             "include a brief description of their personalities and appearance. Write more detailed "
             "descriptions for more important entities.\n\n"
             "Prior context:\n"
