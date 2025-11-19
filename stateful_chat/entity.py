@@ -266,9 +266,13 @@ class JSONEntityManager(EntityManager):
                     'role': 'user',
                     'content': f"Please update entity '{entity.name}'. Respond ONLY with the updated entity name and description formatted as 'name: description'."
                 }
+                response_start = {
+                    'role': 'assistant',
+                    'content': f"{entity.name}: "
+                }
                 updated_entity = self.llm.generate_instruct(
-                    messages=[sys_prompt, user_prompt, response_msg, update_prompt],
-                    response_role="assistant",
+                    messages=[sys_prompt, user_prompt, response_msg, update_prompt, response_start],
+                    respond=False,
                     stream=False
                 )
                 
@@ -276,10 +280,9 @@ class JSONEntityManager(EntityManager):
                 for chunk in updated_entity:
                     llm_response += chunk['response']
                 # parse response
-                name,description = llm_response.split(sep=":", maxsplit=1)
                 updated_entity = GenEntity(
-                    name=name,
-                    description=description
+                    name=entity.name,
+                    description=llm_response.strip()
                 )
                 print("Updated entity:")
                 print(llm_response)
@@ -338,9 +341,13 @@ class JSONEntityManager(EntityManager):
                 'role': 'user',
                 'content': f"Please update entity '{name}'. Respond ONLY with the updated entity name and description formatted as 'name: description'."
             }
+            response_start = {
+                'role': 'assistant',
+                'content': f"{name}: "
+            }
             updated_entity = self.llm.generate_instruct(
-                messages=[sys_prompt, update_prompt],
-                response_role="assistant",
+                messages=[sys_prompt, update_prompt, response_start],
+                respond=False,
                 stream=False
             )
             
@@ -348,10 +355,9 @@ class JSONEntityManager(EntityManager):
             for chunk in updated_entity:
                 llm_response += chunk['response']
             # parse response
-            name,description = llm_response.split(sep=":", maxsplit=1)
             updated_entity = GenEntity(
                 name=name,
-                description=description
+                description=llm_response.strip()
             )
             print("Added new entity:")
             print(llm_response)
