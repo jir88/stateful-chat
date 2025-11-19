@@ -17,7 +17,7 @@ from typing import Dict,Any
 from pydantic import ValidationError
 
 from stateful_chat.entity import SimpleEntityManager, JSONEntityManager
-from stateful_chat.llm import LLM,OpenAILLM,InstructFormat,LLMType
+from stateful_chat.llm import OpenAILLM,InstructFormat
 from stateful_chat.manager import HierarchicalSummaryMemory,HierarchicalSummaryManager,ChatThread,StatefulChatManager
 from stateful_chat.manager import StructuredHierarchicalManager, StructuredHierarchicalMemory
 
@@ -137,7 +137,7 @@ def instruct_format_from_json(json_data):
     """
     # load saved state
     # if data is a string
-    if type(json_data) == str:
+    if isinstance(json_data, str):
         uploaded_settings = json.loads(json_data)
     elif isinstance(json_data, dict):
         # already parsed into a dict
@@ -164,7 +164,7 @@ def llm_from_json(json_data):
     Returns: a new ChatSession object initialized from the JSON data
     """
     # load saved state
-    if type(json_data) == str:
+    if isinstance(json_data, str):
         uploaded_settings = json.loads(json_data)
     elif isinstance(json_data, dict):
         # already parsed into a dict
@@ -175,7 +175,7 @@ def llm_from_json(json_data):
     # if there is a llm-class key, this is already pydantic compatible
     if uploaded_settings.get('llm_class') is not None:
         if uploaded_settings.get('llm_class') == "OpenAILLM":
-            llm = OpenAILLM(**uploaded_settings)
+            return OpenAILLM(**uploaded_settings)
         else:
             raise NotImplementedError("Can't handle other LLM subclasses yet! :/")
     # get model name
@@ -198,7 +198,7 @@ def chat_thread_from_json(json_data):
     Returns: a new ChatThread object initialized from the JSON data
     """
     # load saved state
-    if type(json_data) == str:
+    if isinstance(json_data, str):
         uploaded_settings = json.loads(json_data)
     else:
         uploaded_settings = json.load(json_data)
@@ -223,14 +223,14 @@ def hier_mem_from_json(json_data):
     Returns: a new ChatSession object initialized from the JSON data
     """
     # load saved state
-    if type(json_data) == str:
+    if isinstance(json_data, str):
         uploaded_settings = json.loads(json_data)
     else:
         uploaded_settings = json.load(json_data)
     # initialize LLM
     try:
         llm = OpenAILLM.model_validate_json(uploaded_settings.get('summary_llm'))
-    except ValidationError as e:
+    except ValidationError:
         print("LLM is stored in old format, attempting to recover...")
         llm = llm_from_json(uploaded_settings.get('summary_llm'))
     # load associated chat thread
@@ -322,7 +322,7 @@ def convert_chat(input_data: Dict[str, Any]) -> str:
         # if this is an old non-hierarchical format, try to recover it
         # TODO: convert regular managers into hierarchical ones with no summaries?
         # TODO: upgrade data from stateful chat manager to latest version
-        return StatefulChatManager._recover_old_json_format(uploaded_settings)
+        return StatefulChatManager._recover_old_json_format(input_data)
     # initialize LLM
     # TODO: use some dynamic loading to handle other classes
     llm = llm_from_json(input_data.get('llm'))
