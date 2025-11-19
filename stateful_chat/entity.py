@@ -1,5 +1,6 @@
+import re
 from abc import ABC
-from typing import List, Optional, Dict, Any, Literal, Union
+from typing import List, Optional, Dict, Any, Literal, Union, AnyStr, ClassVar
 from pydantic import BaseModel,Field,SerializeAsAny,root_validator
 
 from .llm import LLM,LLMType
@@ -167,6 +168,9 @@ class JSONEntityManager(EntityManager):
     """
     # type name for deserialization
     entity_manager_class:Literal['JSONEntityManager'] = "JSONEntityManager"
+    
+    # pulls role names out of a string representation of a thread
+    list_pattern: ClassVar[re.Pattern[AnyStr]] = re.compile(r"\[([^\]]*)")
 
     llm: SerializeAsAny[LLMType] = Field(
         default=...,
@@ -179,18 +183,17 @@ class JSONEntityManager(EntityManager):
     prompt_entity_list: str = Field(
         default=(
             "You are creating a list of all important entities mentioned thus far "
-            "and a brief description of each. The list will be formatted as a list of JSON objects. "
-            "You will be given any relevant prior context and the user "
-            "will provide the messages from which you should extract or update entities. For people, "
+            "and a brief description of each. You will be given any relevant prior context. "
+            "You will also have a copy of the current entity list. Finally, you "
+            "will recieve the messages from which you should extract or update entities. For people, "
             "include a brief description of their personalities and appearance. Write more detailed "
             "descriptions for more important entities.\n\n"
             "Prior context:\n"
             "{context}\n\n"
-            "Existing JSON list of entities to be updated:\n"
+            "Existing list of entities to be updated:\n"
             "{entities}\n\n"
-            "Now the user will provide you with the messages from which you should extract entity information. "
-            "Respond only with a JSON list of significant entities and a description of each entity, no "
-            "additional commentary."
+            "Messages from which you should extract or update entity information:\n"
+            "{messages}"
         ),
         description="System prompt used when asking the LLM to produce or update the entity list"
     )
@@ -201,7 +204,7 @@ class JSONEntityManager(EntityManager):
             raise ValueError("llm is required for SimpleEntityManager")
         return values
 
-    def update_entities(self, messages: List[Dict[str, str]], prior_summaries: List[Dict[str, str]] = []) -> str:
+    def update_entities(self, messages: List[Dict[str, str]], prior_summaries: List[Dict[str, str]] = []) -> GenEntityList:
         """
         Update a list of previously-mentioned entities, optionally including a list of
         older summaries as context.
@@ -211,7 +214,7 @@ class JSONEntityManager(EntityManager):
             prior_summaries: a list of older summaries to be used as context when updating
 
         Returns:
-            the updated entity list (string)
+            the updated entity list
         """
         # if no prior context, just put 'No prior context.' in as a placeholder
         if not prior_summaries:
@@ -223,32 +226,140 @@ class JSONEntityManager(EntityManager):
         if old_ent_list is None or len(old_ent_list) == 0:
             ent_txt = "No prior entity list available."
         else:
-            ent_txt = self.entity_list.model_dump_json()
+            ent_txt = "\n\n".join([ent.name + ": " + ent.description for ent in self.entity_list.entities])
 
         # construct system prompt
         sys_prompt = {
             'role': 'system',
             'content': self.prompt_entity_list.format(
                 context="\n\n".join([ps['content'] for ps in prior_summaries]),
-                entities=ent_txt
+                entities=ent_txt,
+                messages="\n\n".join([m['content'] for m in messages])
             )
         }
-        user_prompt = {
+        # make blank list to hold updated entities
+        updated_list = GenEntityList(entities=[])
+        # for each entity
+        for entity in self.entity_list.entities:
+            user_prompt = {
+                'role': 'user',
+                'content': f"Should entity '{entity.name}' be updated based on the messages? Respond ONLY with ##YES## or ##NO##."
+            }
+            update_decision = self.llm.generate_instruct(
+                messages=[sys_prompt, user_prompt],
+                response_role="assistant",
+                stream=False
+            )
+            print("Checking entity: " + entity.name)
+            llm_response = ""
+            for chunk in update_decision:
+                llm_response += chunk['response']
+            print("Needs updating? " + llm_response)
+
+            # if model decided to edit the entity
+            if "##YES##" in llm_response:
+                response_msg = {
+                    'role':'assistant',
+                    'content': llm_response
+                }
+                update_prompt = {
+                    'role': 'user',
+                    'content': f"Please update entity '{entity.name}'. Respond ONLY with the updated entity name and description formatted as 'name: description'."
+                }
+                updated_entity = self.llm.generate_instruct(
+                    messages=[sys_prompt, user_prompt, response_msg, update_prompt],
+                    response_role="assistant",
+                    stream=False
+                )
+                
+                llm_response = ""
+                for chunk in updated_entity:
+                    llm_response += chunk['response']
+                # parse response
+                name,description = llm_response.split(sep=":", maxsplit=1)
+                updated_entity = GenEntity(
+                    name=name,
+                    description=description
+                )
+                print("Updated entity:")
+                print(llm_response)
+                # add to updated list
+                updated_list.entities.append(updated_entity)
+            else:
+                # not updating, so just put the old entity in the list
+                updated_list.entities.append(entity)
+        # now check if there are any new entities we need to extract
+        new_ent_prompt = {
             'role': 'user',
-            'content': "Please update the entity list using information from the following messages:\n\n"
-                       + "\n\n".join([m['content'] for m in messages])
+            'content': (
+                "Based on the messages and the existing entity list, are there any new entities "
+                "we need to add to the entity list? Respond ONLY with a comma-separated list containing "
+                "any new entities that should be added. Surround the list with square brackets, like so:\n\n"
+                "[name1, name2, name3, name4]\n\n"
+                "If there are no new entities to add, respond ONLY with an empty list, like so:\n\n"
+                "[]"
+            )
         }
-
-        # generate the entity list using the provided LLM interface
-        llm_response = self.llm.generate_structured(
-            messages=[sys_prompt, user_prompt],
-            response_model=GenEntityList
+        new_entity_response = self.llm.generate_instruct(
+            messages=[sys_prompt, new_ent_prompt],
+            response_role="assistant",
+            stream=False
         )
-
-        # entity list is alredy parsed to a GenEntityList
-        # for this simple implementation, we'll just keep it as that
-        self.entity_list = llm_response
-        return self.entity_list
+        llm_response = ""
+        for chunk in new_entity_response:
+            llm_response += chunk['response']
+        print("List of entities to add:")
+        print(llm_response)
+        # parse the list of entities to add, ignoring any non-list stuff
+        list_txt = self.list_pattern.search(llm_response)
+        if not list_txt:
+            print("Warning: LLM may have made a mistake writing out a list of entities to add!")
+            print("LLM response was: " + llm_response)
+            return updated_list
+        # get just the list
+        list_txt = list_txt.group(1).strip()
+        # if list is empty
+        if len(list_txt) == 0:
+            return updated_list
+        # split on commas to get entities
+        list_names = list_txt.split(",")
+        # get unique names in case LLM repeated any
+        list_names = set(list_names)
+        # make sure these names are actually not in the existing list
+        list_names = list_names.difference([e.name for e in updated_list.entities])
+        
+        # if nothing new to add
+        if len(list_names) == 0:
+            return updated_list
+        
+        # generate descriptions for new entities
+        for name in list_names:
+            update_prompt = {
+                'role': 'user',
+                'content': f"Please update entity '{name}'. Respond ONLY with the updated entity name and description formatted as 'name: description'."
+            }
+            updated_entity = self.llm.generate_instruct(
+                messages=[sys_prompt, update_prompt],
+                response_role="assistant",
+                stream=False
+            )
+            
+            llm_response = ""
+            for chunk in updated_entity:
+                llm_response += chunk['response']
+            # parse response
+            name,description = llm_response.split(sep=":", maxsplit=1)
+            updated_entity = GenEntity(
+                name=name,
+                description=description
+            )
+            print("Added new entity:")
+            print(llm_response)
+            # add to updated list
+            updated_list.entities.append(updated_entity)
+        # now we have the final list
+        self.entity_list = updated_list
+        return updated_list
     
     def format_readable(self) -> str:
         """
