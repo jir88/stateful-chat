@@ -326,6 +326,8 @@ class JSONEntityManager(EntityManager):
             return updated_list
         # split on commas to get entities
         list_names = list_txt.split(",")
+        # strip whitespace in case LLM put some in
+        list_names = [name.strip() for name in list_names]
         # get unique names in case LLM repeated any
         list_names = set(list_names)
         # make sure these names are actually not in the existing list
