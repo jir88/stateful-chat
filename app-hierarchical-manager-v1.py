@@ -306,8 +306,6 @@ with tab_main:
                                          file_name="settings.json",
                                          key = "session_saver",
                                          help="Click to Download Current Settings")
-    
-    st.button(label="Update memory", on_click=do_memory_update)
 
 # ====================== Memory Tab ========================
 
@@ -416,6 +414,9 @@ with tab_mem:
             st.write(f"Level {level} size: {level_size} ({level_pct}%)")
             total_size += level_size
         st.write(f"Total context size: {total_size}")
+    
+    # update the memory
+    st.button(label="Update memory", on_click=do_memory_update)
 
 # ====================== Archive Tab ========================
 
