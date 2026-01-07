@@ -1,4 +1,5 @@
 import streamlit as st
+import pandas as pd
 import stateful_chat.manager as scm
 import stateful_chat.llm as scl
 import stateful_chat.entity as sce
@@ -190,8 +191,27 @@ def update_entity_settings():
     entity_manager = st.session_state.chat_session.chat_memory.entity_manager
     # the entity prompt
     entity_manager.prompt_entity_list = st.session_state.ta_entity_prompt
-    # if we have a current entity list, update it
-    entity_manager.import_readable(st.session_state.ta_entity_list)
+    # pull the entity list changes from the table
+    df = st.session_state.de_entity_list
+
+    entities = entity_manager.entity_list.entities
+    # for each edited row
+    for ed_row in df['edited_rows'].keys():
+        edit_info = df['edited_rows'][ed_row]
+        edited_entity = entities[ed_row]
+        if 'name' in edit_info.keys():
+            edited_entity.name = edit_info['name']
+        if 'description' in edit_info.keys():
+            edited_entity.description = edit_info['description']
+    
+    # for each added row
+    if len(df['added_rows']) == 1 and len(df['added_rows'][0]) == 0:
+        entities.append(sce.GenEntity(name="", description=""))
+    
+    # for each deleted row
+    entities = [item for index, item in enumerate(entities) if index not in df['deleted_rows']]
+    entity_manager.entity_list.entities = entities
+
 
 def do_memory_update():
     """
@@ -387,13 +407,25 @@ with tab_mem:
         key="ta_entity_prompt",
         on_change=update_entity_settings
     )
-    # manual entity editor
-    st.text_area(
-        "Entity list:", 
-        st.session_state.chat_session.chat_memory.entity_manager.format_readable(), 
-        height = 150,
-        key="ta_entity_list",
-        on_change=update_entity_settings)
+    
+    ent_list = st.session_state.chat_session.chat_memory.entity_manager.entity_list
+    if len(ent_list.entities) > 0:
+        df = pd.DataFrame([{"name": e.name, "description": e.description} for e in ent_list.entities])
+    else:
+        # empty dataframe
+        df = pd.DataFrame({
+            'name': pd.Series(dtype='str'),
+            'description': pd.Series(dtype='str')
+        })
+
+    st.data_editor(
+        df,
+        num_rows="dynamic",
+        use_container_width=True,
+        key="de_entity_list",
+        on_change=update_entity_settings,
+    )
+
     
     # calculate sizes of all summary levels and print them
     if st.button(label="Context size"):
