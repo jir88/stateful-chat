@@ -710,5 +710,4 @@ class StructuredHierarchicalManager(HierarchicalSummaryManager):
         if len(self.chat_memory.all_memory) > 0:
             mems = [m['content'] for m in self.chat_memory.all_memory]
             full_sys_prompt += "\n\nSummary of all previous messages:\n" + "\n".join(mems)
-        print(full_sys_prompt)
         return full_sys_prompt

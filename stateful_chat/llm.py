@@ -538,7 +538,6 @@ class OpenAILLM(LLM):
         Returns:
             The response as a pydantic object.
         """
-        print(str(response_model))
         response = self.client.chat.completions.create(
             model=self.model, 
             messages=messages, 
@@ -591,8 +590,6 @@ class OpenAILLM(LLM):
 LLMType = Union[LLM, OpenAILLM]
 
 if __name__ == "__main__":
-    # print(str(llm_class_registry))
-
     # test loading an instruct format from file
     with open("./instruct_formats/gemma_chat.json", mode="r") as file:
         inst_data = file.read()
